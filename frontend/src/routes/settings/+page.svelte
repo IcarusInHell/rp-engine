@@ -42,10 +42,17 @@
 	let llmAnalysis     = $state('google/gemini-2.0-flash-001');
 	let llmCardGen      = $state('google/gemini-2.0-flash-001');
 	let llmChat         = $state('');
+	let chatMaxVariants = $state(10);
 	let llmEmbeddings   = $state('openai/text-embedding-3-small');
 	let llmFallback     = $state('google/gemini-2.0-flash-001');
 	let llmDefaultPov   = $state('Lilith');
 	let llmChatMode: 'provider' | 'sdk' = $state('provider');
+
+	// Temperatures
+	let tempChat = $state(0.7);
+	let tempRegenBump = $state(0.05);
+	let tempNpc = $state(0.6);
+	let tempSummary = $state(0.5);
 
 	// Search
 	let searchVectorWeight = $state(0.7);
@@ -183,10 +190,15 @@
 			llmAnalysis        = cfg.llm.models.response_analysis;
 			llmCardGen         = cfg.llm.models.card_generation;
 			llmChat            = cfg.chat.model ?? '';
+			chatMaxVariants    = cfg.chat.max_variants ?? 10;
 			llmEmbeddings      = cfg.llm.models.embeddings;
 			llmFallback        = cfg.llm.fallback_model;
 			llmDefaultPov      = cfg.rp.default_pov_character;
 			llmChatMode        = cfg.llm.mode?.chat ?? 'provider';
+			tempChat           = cfg.llm.temperatures?.chat ?? 0.7;
+			tempRegenBump      = cfg.llm.temperatures?.chat_regenerate_bump ?? 0.05;
+			tempNpc            = cfg.llm.temperatures?.npc_reactions ?? 0.6;
+			tempSummary        = cfg.llm.temperatures?.summary ?? 0.5;
 			searchVectorWeight = cfg.search.vector_weight;
 			searchBm25Weight   = cfg.search.bm25_weight;
 			searchThreshold    = cfg.search.similarity_threshold;
@@ -274,9 +286,21 @@
 			},
 			fallback_model: llmFallback,
 			mode: { chat: llmChatMode },
+			temperatures: {
+				chat: tempChat,
+				chat_regenerate_bump: tempRegenBump,
+				npc_reactions: tempNpc,
+				summary: tempSummary,
+			},
 		});
-		save('chat', { model: llmChat.trim() || null });
+		save('chat', { model: llmChat.trim() || null, max_variants: chatMaxVariants });
 		save('rp', { default_pov_character: llmDefaultPov });
+	}
+	function resetTemperatures() {
+		tempChat = 0.7;
+		tempRegenBump = 0.05;
+		tempNpc = 0.6;
+		tempSummary = 0.5;
 	}
 	function saveSearch() {
 		save('search', {
@@ -758,6 +782,64 @@
 					<div>
 						<label class="block text-xs font-medium text-text-dim mb-1" for="llm-pov">Default POV Character</label>
 						<InputField id="llm-pov" bind:value={llmDefaultPov} />
+					</div>
+					{@render saveButton('llm', saveLlm)}
+				</div>
+			</Card>
+
+			<!-- Temperatures -->
+			<Card>
+				<div class="px-4 py-3 border-b border-border-custom flex items-center justify-between">
+					<div>
+						<h2 class="text-sm font-semibold text-text">Temperatures</h2>
+						<p class="text-xs text-text-dim mt-0.5">Lower = more consistent. Higher = more creative. Analytical roles are locked for accuracy.</p>
+					</div>
+					<button
+						class="text-[11px] text-text-dim hover:text-accent transition-colors"
+						onclick={resetTemperatures}
+					>Reset to defaults</button>
+				</div>
+				<div class="p-4 space-y-4">
+					<div>
+						<div class="flex items-center justify-between mb-1">
+							<label class="text-xs font-medium text-text-dim" for="temp-chat">Chat</label>
+							<span class="text-xs font-mono text-text tabular-nums">{tempChat.toFixed(2)}</span>
+						</div>
+						<input id="temp-chat" type="range" min="0" max="1.5" step="0.05" bind:value={tempChat}
+							class="w-full accent-accent" />
+					</div>
+					<div>
+						<div class="flex items-center justify-between mb-1">
+							<label class="text-xs font-medium text-text-dim" for="temp-npc">NPC Reactions</label>
+							<span class="text-xs font-mono text-text tabular-nums">{tempNpc.toFixed(2)}</span>
+						</div>
+						<input id="temp-npc" type="range" min="0" max="1.5" step="0.05" bind:value={tempNpc}
+							class="w-full accent-accent" />
+					</div>
+					<div>
+						<div class="flex items-center justify-between mb-1">
+							<label class="text-xs font-medium text-text-dim" for="temp-summary">Summary</label>
+							<span class="text-xs font-mono text-text tabular-nums">{tempSummary.toFixed(2)}</span>
+						</div>
+						<input id="temp-summary" type="range" min="0" max="1" step="0.05" bind:value={tempSummary}
+							class="w-full accent-accent" />
+					</div>
+					<div>
+						<div class="flex items-center justify-between mb-1">
+							<label class="text-xs font-medium text-text-dim" for="temp-regen-bump">Regenerate Bump</label>
+							<span class="text-xs font-mono text-text tabular-nums">+{tempRegenBump.toFixed(2)}</span>
+						</div>
+						<input id="temp-regen-bump" type="range" min="0" max="0.3" step="0.01" bind:value={tempRegenBump}
+							class="w-full accent-accent" />
+					</div>
+					<div>
+						<div class="flex items-center justify-between mb-1">
+							<label class="text-xs font-medium text-text-dim" for="max-variants">Max Regenerations</label>
+							<span class="text-xs font-mono text-text tabular-nums">{chatMaxVariants}</span>
+						</div>
+						<input id="max-variants" type="range" min="3" max="50" step="1" bind:value={chatMaxVariants}
+							class="w-full accent-accent" />
+						<p class="text-xs text-text-dim mt-1">Maximum number of swipe variants per exchange</p>
 					</div>
 					{@render saveButton('llm', saveLlm)}
 				</div>

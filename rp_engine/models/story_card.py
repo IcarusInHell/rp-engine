@@ -71,6 +71,7 @@ class SuggestCardRequest(BaseModel):
     rp_folder: str
     branch: str = "main"
     additional_context: str = ""
+    related_entities: list[str] = []
 
 
 class SuggestCardResponse(BaseModel):

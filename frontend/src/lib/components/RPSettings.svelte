@@ -323,7 +323,7 @@
 					<div class="grid grid-cols-2 gap-4">
 						<FormField label="Response Length" id="g-length" size="xs">
 							<SelectField id="g-length" bind:value={gResponseLength}
-								options={[{value: "short", label: "Short"}, {value: "medium", label: "Medium"}, {value: "long", label: "Long"}]} />
+								options={[{value: "short", label: "Short"}, {value: "medium", label: "Medium"}, {value: "long", label: "Long"}, {value: "variable", label: "Variable"}]} />
 						</FormField>
 						<FormField label="Tone" id="g-tone" size="xs">
 							<input id="g-tone" type="text" bind:value={gTone} placeholder="dark, gritty, atmospheric" class={inputClass} />

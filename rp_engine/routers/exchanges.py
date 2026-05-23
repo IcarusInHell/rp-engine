@@ -31,6 +31,7 @@ from rp_engine.models.exchange import (
     ExchangeSave,
     ExchangeSearchHit,
     ExchangeSearchResponse,
+    ExchangeUpdate,
 )
 from rp_engine.services.branch_manager import BranchManager
 from rp_engine.services.exchange_writer import ExchangeWriter
@@ -59,11 +60,13 @@ def _detail_from_row(row: dict) -> ExchangeDetail:
         id=row["id"],
         exchange_number=row["exchange_number"],
         session_id=row["session_id"],
+        branch=row.get("branch"),
         user_message=row["user_message"],
         assistant_response=row["assistant_response"],
         in_story_timestamp=row.get("in_story_timestamp"),
         location=row.get("location"),
         npcs_involved=npcs,
+        message_mode=row.get("message_mode", "rp"),
         analysis_status=row.get("analysis_status", "pending"),
         created_at=row["created_at"],
         metadata=metadata,
@@ -112,6 +115,19 @@ def _build_update(fields: dict) -> tuple[list[str], list]:
             updates.append(f"{col} = ?")
             params.append(val)
     return updates, params
+
+
+def _build_ancestry_sql(
+    rp_folder: str, chain: list[tuple[str, int]]
+) -> tuple[str, list]:
+    """Build a parameterized SQL WHERE clause from an ancestry chain.
+
+    Thin wrapper around ``AncestryResolver.build_ancestry_sql()`` with the
+    ``e`` table alias pre-applied (used throughout this router).
+    """
+    from rp_engine.services.ancestry_resolver import AncestryResolver
+
+    return AncestryResolver.build_ancestry_sql(rp_folder, chain, table_alias="e")
 
 
 _BOOKMARK_ANNOTATION_JOINS = """
@@ -276,39 +292,93 @@ _LIST_QUERY = f"""
 """
 
 
+@router.put("/{exchange_number}", response_model=ExchangeDetail)
+async def edit_exchange(
+    exchange_number: int,
+    body: ExchangeUpdate,
+    rp_folder: str = Query(...),
+    branch: str = Query("main"),
+    db: Database = Depends(get_db),
+    exchange_writer: ExchangeWriter = Depends(get_exchange_writer),
+):
+    """Edit an exchange's user message and/or assistant response.
+
+    For assistant responses, creates a new variant with source='manual_edit'.
+    The original response is preserved as a variant for swipe-back.
+    """
+    try:
+        updated = await exchange_writer.update_exchange(
+            exchange_number,
+            rp_folder,
+            branch,
+            user_message=body.user_message,
+            assistant_response=body.assistant_response,
+            re_embed=body.re_embed,
+            re_analyze=body.re_analyze,
+        )
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from None
+
+    # Fetch enriched detail (with variant/bookmark/annotation counts)
+    row = await db.fetch_one(
+        f"""{_LIST_QUERY} WHERE e.id = ?""",
+        [updated["id"]],
+    )
+    return _detail_from_row(row)
+
+
 @router.get("", response_model=ExchangeListResponse)
 async def list_exchanges(
     session_id: str | None = Query(None),
     branch: str | None = Query(None),
     rp_folder: str | None = Query(None),
+    include_ancestry: bool = Query(True),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Database = Depends(get_db),
+    branch_manager: BranchManager = Depends(get_branch_manager),
 ):
-    """List exchanges with optional filters."""
-    conditions = []
-    params: list = []
+    """List exchanges with optional filters.
 
-    if session_id:
-        conditions.append("e.session_id = ?")
-        params.append(session_id)
-    if branch:
-        conditions.append("e.branch = ?")
-        params.append(branch)
-    if rp_folder:
-        conditions.append("e.rp_folder = ?")
-        params.append(rp_folder)
+    When ``include_ancestry`` is True (default) and both ``rp_folder`` and
+    ``branch`` are specified, walks the branch ancestry chain so child branches
+    see exchanges from parent branches up to each branch point.
+    """
+    # Ancestry-aware path: build compound WHERE from ancestry chain
+    if include_ancestry and rp_folder and branch and not session_id:
+        chain = await branch_manager.get_ancestry_chain(rp_folder, branch)
+        ancestry_clauses, ancestry_params = _build_ancestry_sql(rp_folder, chain)
 
-    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        where = f" WHERE {ancestry_clauses}"
+        total = await db.fetch_val(
+            f"SELECT COUNT(*) FROM exchanges e{where}", ancestry_params,
+        )
+        rows = await db.fetch_all(
+            f"{_LIST_QUERY}{where} ORDER BY e.exchange_number DESC LIMIT ? OFFSET ?",
+            ancestry_params + [limit, offset],
+        )
+    else:
+        # Flat query (original behavior)
+        conditions = []
+        params: list = []
+        if session_id:
+            conditions.append("e.session_id = ?")
+            params.append(session_id)
+        if branch:
+            conditions.append("e.branch = ?")
+            params.append(branch)
+        if rp_folder:
+            conditions.append("e.rp_folder = ?")
+            params.append(rp_folder)
 
-    total = await db.fetch_val(
-        f"SELECT COUNT(*) FROM exchanges e{where}", params,
-    )
-
-    rows = await db.fetch_all(
-        f"{_LIST_QUERY}{where} ORDER BY e.exchange_number DESC LIMIT ? OFFSET ?",
-        params + [limit, offset],
-    )
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        total = await db.fetch_val(
+            f"SELECT COUNT(*) FROM exchanges e{where}", params,
+        )
+        rows = await db.fetch_all(
+            f"{_LIST_QUERY}{where} ORDER BY e.exchange_number DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
 
     return ExchangeListResponse(
         exchanges=[_detail_from_row(r) for r in rows],
@@ -346,15 +416,20 @@ async def search_exchanges(
     mode: SearchMode = Query(SearchMode.semantic),
     db: Database = Depends(get_db),
     lance_store: LanceStore | None = Depends(get_lance_store),
+    branch_manager: BranchManager = Depends(get_branch_manager),
 ):
     """Search exchange history via semantic, keyword, or hybrid mode."""
     results: list[ExchangeSearchHit] = []
+
+    # Get ancestry chain for cross-branch search
+    ancestry_chain = await branch_manager.get_ancestry_chain(rp_folder, branch)
 
     # --- Semantic search via LanceDB ---
     lance_hits: dict[int, float] = {}
     if mode in (SearchMode.semantic, SearchMode.hybrid) and lance_store:
         lance_results = await lance_store.search_exchanges(
             query_text=q, rp_folder=rp_folder, branch=branch, limit=limit * 2,
+            ancestry_chain=ancestry_chain,
         )
         for hit in lance_results:
             ex_num = hit.metadata.get("exchange_number")
@@ -363,16 +438,17 @@ async def search_exchanges(
                 if ex_num not in lance_hits or hit.score > lance_hits[ex_num]:
                     lance_hits[ex_num] = hit.score
 
-    # --- Keyword search via SQLite LIKE (simple, no FTS5 on exchanges) ---
+    # --- Keyword search via SQLite LIKE (ancestry-aware) ---
     keyword_hits: dict[int, float] = {}
     if mode in (SearchMode.keyword, SearchMode.hybrid):
         like_param = f"%{q}%"
+        ancestry_where, ancestry_params = _build_ancestry_sql(rp_folder, ancestry_chain)
         kw_rows = await db.fetch_all(
-            """SELECT exchange_number FROM exchanges
-               WHERE rp_folder = ? AND branch = ?
+            f"""SELECT exchange_number FROM exchanges e
+               WHERE {ancestry_where}
                AND (user_message LIKE ? OR assistant_response LIKE ?)
                LIMIT ?""",
-            [rp_folder, branch, like_param, like_param, limit * 2],
+            ancestry_params + [like_param, like_param, limit * 2],
         )
         for row in kw_rows:
             keyword_hits[row["exchange_number"]] = 0.8  # flat keyword score
@@ -400,15 +476,16 @@ async def search_exchanges(
     top = sorted(scored.items(), key=lambda x: -x[1])[:limit]
     exchange_numbers = [ex_num for ex_num, _ in top]
 
-    # Fetch full exchange data + bookmark/annotation enrichment
+    # Fetch full exchange data + bookmark/annotation enrichment (ancestry-aware)
     placeholders = ",".join("?" for _ in exchange_numbers)
+    ancestry_where, ancestry_params = _build_ancestry_sql(rp_folder, ancestry_chain)
     rows = await db.fetch_all(
         f"""SELECT e.*, b.name AS bookmark_name,
                    COALESCE(a.acnt, 0) AS annotation_count
             FROM exchanges e{_BOOKMARK_ANNOTATION_JOINS}
-            WHERE e.rp_folder = ? AND e.branch = ?
+            WHERE {ancestry_where}
             AND e.exchange_number IN ({placeholders})""",
-        [rp_folder, branch] + exchange_numbers,
+        ancestry_params + exchange_numbers,
     )
 
     row_map = {r["exchange_number"]: r for r in rows}

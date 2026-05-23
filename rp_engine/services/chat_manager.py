@@ -11,7 +11,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-from rp_engine.config import ChatConfig
+from rp_engine.config import ChatConfig, LLMTemperaturesConfig, get_config
 from rp_engine.database import PRIORITY_EXCHANGE, Database
 from rp_engine.models.chat import (
     ChatResponse,
@@ -26,6 +26,11 @@ from rp_engine.services.exchange_writer import ExchangeWriter
 from rp_engine.services.llm_client import LLMClient
 from rp_engine.services.prompt_assembler import PromptAssembler
 from rp_engine.services.state_entry_resolver import latest_exchange
+from rp_engine.utils.direction import (
+    build_direction_message,
+    build_ooc_message,
+    parse_direction_markers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +61,49 @@ class ChatManager:
         prompt_assembler: PromptAssembler,
         llm_client: LLMClient,
         exchange_writer: ExchangeWriter,
-        config: ChatConfig,
     ) -> None:
         self.db = db
         self.context_engine = context_engine
         self.prompt_assembler = prompt_assembler
         self.llm_client = llm_client
         self.exchange_writer = exchange_writer
-        self.config = config
+
+    @property
+    def _chat_config(self) -> ChatConfig:
+        """Read chat config dynamically so hot-reloaded config changes take effect."""
+        return get_config().chat
+
+    @property
+    def _temperatures(self) -> LLMTemperaturesConfig:
+        """Read temperature config dynamically."""
+        return get_config().llm.temperatures
+
+    @property
+    def _model(self) -> str:
+        """Resolve the model to use — config override or provider fallback."""
+        return self._chat_config.model or self.llm_client.fallback_model
+
+    def _prepare_message(
+        self, user_message: str, message_mode: str, ooc: bool = False,
+    ) -> tuple[str, str, str]:
+        """Resolve message mode, parse direction markers.
+
+        Returns (message_mode, save_user_message, direction_text).
+        """
+        if ooc and message_mode == "rp":
+            message_mode = "ooc"
+
+        save_user_message = user_message
+        direction_text = ""
+        if message_mode == "rp":
+            parsed = parse_direction_markers(user_message)
+            if parsed.has_direction:
+                save_user_message = parsed.rp_content
+                direction_text = parsed.direction_content
+        elif message_mode == "direction":
+            direction_text = user_message
+
+        return message_mode, save_user_message, direction_text
 
     # ── Chat ─────────────────────────────────────────────────────────
 
@@ -76,26 +116,33 @@ class ChatManager:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        message_mode: str = "rp",
         ooc: bool = False,
         attach_card_ids: list[str] | None = None,
         scene_override: SceneOverride | None = None,
     ) -> ChatResponse:
         """Full non-streaming chat pipeline."""
+        message_mode, save_user_message, direction_text = self._prepare_message(
+            user_message, message_mode, ooc,
+        )
+
         messages = await self._build_pipeline_messages(
             user_message, rp_folder, branch, session_id,
             attach_card_ids=attach_card_ids,
             scene_override=scene_override,
         )
 
-        model = self.config.model or self.llm_client.fallback_model
+        # Inject mode-specific system messages
+        self._inject_mode_messages(messages, message_mode, direction_text)
+
         llm_response = await self.llm_client.generate(
             messages=messages,
-            model=model,
-            temperature=temperature if temperature is not None else self.config.temperature,
-            max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+            model=self._model,
+            temperature=temperature if temperature is not None else self._temperatures.chat,
+            max_tokens=max_tokens if max_tokens is not None else self._chat_config.max_tokens,
         )
 
-        if ooc:
+        if message_mode == "ooc":
             return ChatResponse(
                 response=llm_response.content,
                 exchange_id=0,
@@ -108,8 +155,9 @@ class ChatManager:
             rp_folder=rp_folder,
             branch=branch,
             session_id=session_id,
-            user_message=user_message,
+            user_message=save_user_message,
             assistant_response=llm_response.content,
+            message_mode=message_mode,
         )
 
         return ChatResponse(
@@ -129,30 +177,37 @@ class ChatManager:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        message_mode: str = "rp",
         ooc: bool = False,
         attach_card_ids: list[str] | None = None,
         scene_override: SceneOverride | None = None,
     ) -> AsyncIterator[str]:
         """Streaming chat pipeline. Yields SSE-formatted events."""
         try:
+            message_mode, save_user_message, direction_text = self._prepare_message(
+                user_message, message_mode, ooc,
+            )
+
             messages = await self._build_pipeline_messages(
                 user_message, rp_folder, branch, session_id,
                 attach_card_ids=attach_card_ids,
                 scene_override=scene_override,
             )
 
-            model = self.config.model or self.llm_client.fallback_model
+            # Inject mode-specific system messages
+            self._inject_mode_messages(messages, message_mode, direction_text)
+
             collected: list[str] = []
             async for token in self._stream_and_collect(
                 collected,
                 messages=messages,
-                model=model,
-                temperature=temperature if temperature is not None else self.config.temperature,
-                max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+                model=self._model,
+                temperature=temperature if temperature is not None else self._temperatures.chat,
+                max_tokens=max_tokens if max_tokens is not None else self._chat_config.max_tokens,
             ):
                 yield token
 
-            if ooc:
+            if message_mode == "ooc":
                 yield _sse_done(exchange_id=0, exchange_number=0, ooc=True)
                 return
 
@@ -161,8 +216,9 @@ class ChatManager:
                 rp_folder=rp_folder,
                 branch=branch,
                 session_id=session_id,
-                user_message=user_message,
+                user_message=save_user_message,
                 assistant_response=response_text,
+                message_mode=message_mode,
             )
 
             yield _sse_done(exchange_id=exchange_id, exchange_number=exchange_number)
@@ -188,13 +244,14 @@ class ChatManager:
 
         messages = await self._build_pipeline_messages(
             exchange["user_message"], rp_folder, branch, session_id,
+            exclude_exchange_number=exchange["exchange_number"],
         )
 
         llm_response = await self.llm_client.generate(
             messages=messages,
             model=use_model,
             temperature=use_temp,
-            max_tokens=self.config.max_tokens,
+            max_tokens=self._chat_config.max_tokens,
         )
 
         variant_id, variant_index, total = await self._save_variant(
@@ -228,6 +285,7 @@ class ChatManager:
 
             messages = await self._build_pipeline_messages(
                 exchange["user_message"], rp_folder, branch, session_id,
+                exclude_exchange_number=exchange["exchange_number"],
             )
 
             collected: list[str] = []
@@ -236,7 +294,7 @@ class ChatManager:
                 messages=messages,
                 model=use_model,
                 temperature=use_temp,
-                max_tokens=self.config.max_tokens,
+                max_tokens=self._chat_config.max_tokens,
             ):
                 yield token
 
@@ -312,17 +370,17 @@ class ChatManager:
         messages = self._build_continue_messages(
             await self._build_pipeline_messages(
                 exchange["user_message"], rp_folder, branch, session_id,
+                exclude_exchange_number=exchange["exchange_number"],
             ),
             existing_response,
         )
 
-        use_max_tokens = max_tokens or self.config.continue_max_tokens
-        model = self.config.model or self.llm_client.fallback_model
+        use_max_tokens = max_tokens or self._chat_config.continue_max_tokens
 
         llm_response = await self.llm_client.generate(
             messages=messages,
-            model=model,
-            temperature=self.config.temperature,
+            model=self._model,
+            temperature=self._temperatures.chat,
             max_tokens=use_max_tokens,
         )
 
@@ -358,19 +416,19 @@ class ChatManager:
             messages = self._build_continue_messages(
                 await self._build_pipeline_messages(
                     exchange["user_message"], rp_folder, branch, session_id,
+                    exclude_exchange_number=exchange["exchange_number"],
                 ),
                 existing_response,
             )
 
-            use_max_tokens = max_tokens or self.config.continue_max_tokens
-            model = self.config.model or self.llm_client.fallback_model
+            use_max_tokens = max_tokens or self._chat_config.continue_max_tokens
 
             collected: list[str] = []
             async for token in self._stream_and_collect(
                 collected,
                 messages=messages,
-                model=model,
-                temperature=self.config.temperature,
+                model=self._model,
+                temperature=self._temperatures.chat,
                 max_tokens=use_max_tokens,
             ):
                 yield token
@@ -462,6 +520,7 @@ class ChatManager:
         *,
         attach_card_ids: list[str] | None = None,
         scene_override: SceneOverride | None = None,
+        exclude_exchange_number: int | None = None,
     ) -> list[dict]:
         """Run context pipeline and build prompt messages."""
         request = ContextRequest(
@@ -514,7 +573,25 @@ class ChatManager:
             user_message=user_message,
             context_response=context_response,
             session_id=session_id,
+            exclude_exchange_number=exclude_exchange_number,
         )
+
+    @staticmethod
+    def _inject_mode_messages(
+        messages: list[dict], message_mode: str, direction_text: str,
+    ) -> None:
+        """Inject direction/OOC system messages into the prompt.
+
+        For direction and mixed (inline markers): inserts a direction system
+        message just before the final user message so the LLM sees the guidance.
+        For OOC: inserts an instruction telling the LLM the user is speaking OOC.
+        """
+        if message_mode == "ooc":
+            # Insert OOC instruction before the last user message
+            messages.insert(-1, build_ooc_message())
+        elif direction_text:
+            # Insert direction guidance before the last user message
+            messages.insert(-1, build_direction_message(direction_text))
 
     async def _save_exchange(
         self,
@@ -523,6 +600,7 @@ class ChatManager:
         session_id: str,
         user_message: str,
         assistant_response: str,
+        message_mode: str = "rp",
     ) -> tuple[int, int]:
         """Save exchange to DB, enqueue for analysis, embed in vector store."""
         return await self.exchange_writer.save_exchange(
@@ -531,6 +609,7 @@ class ChatManager:
             branch=branch,
             user_message=user_message,
             assistant_response=assistant_response,
+            message_mode=message_mode,
         )
 
     async def _get_exchange(
@@ -556,9 +635,9 @@ class ChatManager:
     ) -> tuple[float, str]:
         """Resolve temperature and model for regeneration."""
         use_temp = temperature if temperature is not None else (
-            self.config.temperature + self.config.regenerate_temperature_bump
+            self._temperatures.chat + self._temperatures.chat_regenerate_bump
         )
-        use_model = model or self.config.model or self.llm_client.fallback_model
+        use_model = model or self._model
         return use_temp, use_model
 
     async def _deactivate_all_variants(self, exchange_id: int) -> None:
@@ -601,8 +680,9 @@ class ChatManager:
             f = await self.db.enqueue_write(
                 """INSERT INTO exchange_variants
                    (exchange_id, rp_folder, branch, exchange_number,
-                    assistant_response, model_used, temperature, is_active, created_at)
-                   VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, ?)""",
+                    assistant_response, model_used, temperature, source,
+                    is_active, created_at)
+                   VALUES (?, ?, ?, ?, ?, NULL, NULL, 'llm', 0, ?)""",
                 [
                     exchange_id, exchange["rp_folder"], exchange["branch"],
                     exchange["exchange_number"], exchange["assistant_response"],
@@ -613,24 +693,25 @@ class ChatManager:
             await f
             count = 1
 
-        if count >= self.config.max_variants:
+        if count >= self._chat_config.max_variants:
             raise ValueError(
-                f"Maximum variants ({self.config.max_variants}) reached for exchange "
+                f"Maximum variants ({self._chat_config.max_variants}) reached for exchange "
                 f"{exchange['exchange_number']}"
             )
 
         now = datetime.now(UTC).isoformat()
-        is_active = 1 if self.config.auto_activate_regeneration else 0
+        is_active = 1 if self._chat_config.auto_activate_regeneration else 0
 
         # Deactivate existing variants before inserting new active one
-        if self.config.auto_activate_regeneration:
+        if self._chat_config.auto_activate_regeneration:
             await self._deactivate_all_variants(exchange_id)
 
         f = await self.db.enqueue_write(
             """INSERT INTO exchange_variants
                (exchange_id, rp_folder, branch, exchange_number,
-                assistant_response, model_used, temperature, is_active, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                assistant_response, model_used, temperature, source,
+                is_active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'llm', ?, ?)""",
             [
                 exchange_id, exchange["rp_folder"], exchange["branch"],
                 exchange["exchange_number"], response, model, temperature,
@@ -644,7 +725,7 @@ class ChatManager:
         variant_index = total - 1
 
         # If auto-activate, update the main exchange table
-        if self.config.auto_activate_regeneration:
+        if self._chat_config.auto_activate_regeneration:
             await self.exchange_writer.update_response(exchange_id, response)
 
         return variant_id, variant_index, total

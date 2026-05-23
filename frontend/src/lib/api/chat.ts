@@ -58,8 +58,11 @@ async function* _streamSSE(
 	}
 }
 
+export type MessageMode = 'rp' | 'ooc' | 'direction';
+
 export interface ChatOptions {
-	ooc?: boolean;
+	message_mode?: MessageMode;
+	ooc?: boolean; // deprecated — use message_mode="ooc"
 	attach_card_ids?: string[];
 	scene_override?: SceneOverride;
 }

@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from rp_engine.config import SearchConfig
+from rp_engine.config import SearchConfig, get_config
 from rp_engine.database import PRIORITY_REINDEX, Database
 from rp_engine.utils.lru_cache import LRUCache
 from rp_engine.utils.text import chunk_text, sanitize_fts_query
@@ -48,20 +48,33 @@ class VectorSearch:
     def __init__(
         self,
         db: Database,
-        config: SearchConfig,
+        config: SearchConfig | None = None,
         embed_fn: Callable | None = None,
         api_key: str | None = None,
         embedding_model: str = "unknown",
     ) -> None:
         self.db = db
-        self.config = config
+        self._config_override: SearchConfig | None = config
         self._embed_fn = embed_fn or self._default_embed
         self._api_key = api_key
         self._embedding_model = embedding_model
         # LRU cache: rp_folder → (ids, matrix, norms)
+        # Cache maxsize is set at construction (immutable — changing requires rebuild)
+        effective_config = config or SearchConfig()
         self._vector_cache: LRUCache[str, tuple[list[int], np.ndarray, np.ndarray]] = LRUCache(
-            maxsize=config.vector_cache_max
+            maxsize=effective_config.vector_cache_max
         )
+
+    @property
+    def config(self) -> SearchConfig:
+        """Read search config dynamically so hot-reloaded changes take effect.
+
+        Tests can pass a custom SearchConfig at construction to override.
+        Production code passes None; the property reads from get_config().
+        """
+        if self._config_override is not None:
+            return self._config_override
+        return get_config().search
 
     async def search(
         self,

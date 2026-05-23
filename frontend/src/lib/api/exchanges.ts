@@ -2,8 +2,10 @@ import { apiFetch } from './client';
 import type {
 	ExchangeSave,
 	ExchangeResponse,
+	ExchangeDetail,
 	ExchangeListResponse,
 	ExchangeSearchResponse,
+	ExchangeUpdate,
 	BookmarkCreate,
 	BookmarkUpdate,
 	BookmarkResponse,
@@ -23,6 +25,13 @@ export async function listExchanges(params?: { session_id?: string; limit?: numb
 export async function saveExchange(body: ExchangeSave): Promise<ExchangeResponse> {
 	return apiFetch<ExchangeResponse>('/api/exchanges', {
 		method: 'POST',
+		body: JSON.stringify(body),
+	});
+}
+
+export async function editExchange(exchangeNumber: number, body: ExchangeUpdate): Promise<ExchangeDetail> {
+	return apiFetch<ExchangeDetail>(`/api/exchanges/${exchangeNumber}`, {
+		method: 'PUT',
 		body: JSON.stringify(body),
 	});
 }

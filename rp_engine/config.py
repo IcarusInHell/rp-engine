@@ -55,6 +55,14 @@ class LLMModeConfig(BaseModel):
     chat: Literal["provider", "sdk"] = "provider"
 
 
+class LLMTemperaturesConfig(BaseModel):
+    """User-tunable temperatures for creative roles. Analytical roles stay hardcoded."""
+    chat: float = 0.7
+    chat_regenerate_bump: float = 0.05
+    npc_reactions: float = 0.6
+    summary: float = 0.5
+
+
 class LLMConfig(BaseModel):
     provider: str = "openrouter"
     api_key: str = "env:OPENROUTER_API_KEY"
@@ -63,6 +71,7 @@ class LLMConfig(BaseModel):
     fallback_model: str = "google/gemini-2.0-flash-001"
     embedding_fallback_provider: str | None = None
     mode: LLMModeConfig = LLMModeConfig()
+    temperatures: LLMTemperaturesConfig = LLMTemperaturesConfig()
 
 
 class PacingPresets(BaseModel):
@@ -89,7 +98,7 @@ class ChatConfig(BaseModel):
     model: str | None = None
     temperature: float = 0.7
     max_tokens: int = 4000
-    max_variants: int = 10
+    max_variants: int = 15
     regenerate_temperature_bump: float = 0.05
     auto_activate_regeneration: bool = True
     continue_max_tokens: int = 2000

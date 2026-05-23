@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
+from rp_engine.constants.agent_prompts import build_system_prompt
 from rp_engine.database import Database
 from rp_engine.dependencies import get_db, get_guidelines_service, require_chat_mode
 from rp_engine.services.guidelines_service import GuidelinesService
@@ -155,78 +156,80 @@ async def _build_guidelines_text(
     guidelines_svc: GuidelinesService,
 ) -> str:
     """Build a readable text from guidelines for the system prompt."""
+    from rp_engine.constants.prompt_guidance import (
+        RESPONSE_LENGTH_GUIDANCE,
+        SCENE_PACING_GUIDANCE,
+        build_content_boundaries,
+        build_pov_section,
+        build_user_narrative_guidance,
+    )
+
     resp = guidelines_svc.get_guidelines(rp_folder)
     if resp is None:
         return ""
-    parts = []
-    for key in ("narrative_voice", "tense", "tone", "scene_pacing",
-                "response_length", "pov_mode", "pov_character"):
-        val = getattr(resp, key, None)
-        if val:
-            parts.append(f"- **{key.replace('_', ' ').title()}:** {val}")
-    if resp.sensitive_themes:
-        parts.append(f"- **Sensitive Themes:** {', '.join(resp.sensitive_themes)}")
-    if resp.hard_limits:
-        parts.append(f"- **Hard Limits:** {resp.hard_limits}")
+
+    parts: list[str] = []
+
+    # Compact metadata with expanded guidance
+    meta: list[str] = []
+    if resp.pov_mode:
+        meta.append(f"POV: {resp.pov_mode}")
+    if resp.narrative_voice:
+        meta.append(f"Voice: {resp.narrative_voice}")
+    if resp.tense:
+        meta.append(f"Tense: {resp.tense}")
+
+    pacing = resp.scene_pacing
+    if pacing:
+        desc = SCENE_PACING_GUIDANCE.get(pacing, pacing)
+        meta.append(f"Pacing: {pacing} ({desc})")
+
+    length = resp.response_length
+    if length:
+        desc = RESPONSE_LENGTH_GUIDANCE.get(length, length)
+        meta.append(f"Length: {length} ({desc})")
+
+    tone = resp.tone
+    if tone:
+        meta.append(f"Tone: {', '.join(tone) if isinstance(tone, list) else tone}")
+
+    dual_chars = getattr(resp, "dual_characters", None) or []
+    if dual_chars:
+        meta.append(f"Dual: {', '.join(dual_chars)}")
+
+    if meta:
+        parts.append(" | ".join(meta))
+
+    # POV instructions
+    pov = build_pov_section(
+        pov_mode=resp.pov_mode,
+        pov_character=getattr(resp, "pov_character", None) or None,
+        dual_characters=dual_chars,
+    )
+    if pov:
+        parts.append(pov)
+
+    # Content boundaries
+    boundaries = build_content_boundaries(
+        sensitive_themes=resp.sensitive_themes,
+        hard_limits=resp.hard_limits,
+    )
+    if boundaries:
+        parts.append(boundaries)
+
+    # User-narrative integration
+    narrative = build_user_narrative_guidance(
+        integrate_user_narrative=bool(getattr(resp, "integrate_user_narrative", False)),
+        preserve_user_details=bool(getattr(resp, "preserve_user_details", False)),
+    )
+    if narrative:
+        parts.append(narrative)
+
+    # Body (user's custom guidelines text)
     if resp.body:
-        parts.append(f"\n{resp.body}")
-    return "\n".join(parts)
+        parts.append(resp.body)
 
-
-def _build_system_prompt(rp_folder: str, branch: str, guidelines_text: str) -> str:
-    """Build the agent system prompt with injected guidelines."""
-    return f"""\
-You are an immersive roleplay narrator for an ongoing RP story. You have access \
-to rp-engine MCP tools that provide story context, NPC intelligence, and state \
-management. Use them to maintain narrative consistency.
-
-## Story Guidelines
-
-{guidelines_text or "(No guidelines found for this RP.)"}
-
-## Per-Turn Workflow
-
-On EVERY user RP message, follow this exact workflow:
-
-1. **Get context** — Call `get_scene_context` with the user's message and \
-`skip_guidelines=true` (guidelines are already in this system prompt). This \
-returns: relevant story cards, NPC briefs, scene state, character conditions, \
-plot thread alerts, and the current_exchange number.
-
-2. **Check NPCs** — If NPCs are actively involved in the scene and you need \
-detailed reactions beyond the briefs, call `get_npc_reaction` or \
-`batch_npc_reactions` for important NPC moments.
-
-3. **Write narrative** — Using all the context gathered, write immersive RP \
-narrative that:
-   - Follows the story guidelines above
-   - Respects NPC trust levels and archetypes from the briefs
-   - Maintains scene continuity (location, time, mood)
-   - Honors character states and conditions
-   - Advances or references active plot threads where natural
-
-4. **Save the exchange** — Call `save_exchange` with:
-   - `user_message`: the user's input
-   - `assistant_response`: your narrative response (clean text only — no \
-tool calls, thinking, or meta commentary)
-   - `exchange_number`: current_exchange + 1 (from step 1)
-   - `session_id`: the active session ID
-
-## Rules
-
-- **Never mention tools or meta-information** in your narrative responses
-- **Never break character** — all responses are in-character narrative
-- **Respect trust levels** — NPCs behave according to their trust stage and \
-archetype. Don't have hostile NPCs suddenly act friendly.
-- **Clean responses only** — save_exchange gets ONLY the RP narrative text
-- **Out-of-character messages** — If the user sends an OOC message (prefixed \
-with // or (( ))), respond OOC without calling save_exchange
-
-## Session Info
-
-- **RP Folder:** {rp_folder}
-- **Branch:** {branch}
-"""
+    return "\n\n".join(parts)
 
 
 async def _agent_stream(
@@ -245,7 +248,7 @@ async def _agent_stream(
         query,
     )
 
-    system_prompt = _build_system_prompt(rp_folder, branch, guidelines_text)
+    system_prompt = build_system_prompt(rp_folder, branch, guidelines_text)
     python_exe = sys.executable
 
     if resume_session_id:

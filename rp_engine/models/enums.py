@@ -60,7 +60,7 @@ PovMode = Literal["single", "dual"]
 NarrativeVoice = Literal["first", "third"]
 Tense = Literal["present", "past"]
 ScenePacing = Literal["slow", "moderate", "fast"]
-ResponseLength = Literal["short", "medium", "long"]
+ResponseLength = Literal["short", "medium", "long", "variable"]
 
 # === Memory ===
 EmotionalTone = Literal["positive", "negative", "complex", "neutral", "traumatic"]

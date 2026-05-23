@@ -12,7 +12,6 @@ from rp_engine.database import Database
 from rp_engine.dependencies import (
     get_card_indexer,
     get_db,
-    get_graph_resolver,
     get_guidelines_service,
     get_llm_client,
     get_vault_root,
@@ -41,7 +40,6 @@ from rp_engine.models.story_card import (
     SuggestCardResponse,
 )
 from rp_engine.services.card_indexer import CARD_TYPE_DIRS, CardIndexer
-from rp_engine.services.graph_resolver import GraphResolver
 from rp_engine.services.llm_client import LLMClient
 from rp_engine.utils.frontmatter import parse_frontmatter, serialize_frontmatter
 from rp_engine.utils.json_helpers import safe_parse_json
@@ -64,8 +62,8 @@ def _sanitize_llm_card(markdown: str) -> str:
 
     Handles:
     - Markdown code fences wrapping the entire response
-    - Duplicate frontmatter blocks (keeps the more complete one)
-    - Stray 'yaml' text after a closing --- (from code fence leakage)
+    - Multiple duplicate frontmatter blocks (keeps the most complete one)
+    - Stray 'yaml' / 'markdown' text between blocks (code fence leakage)
     """
     text = markdown.strip()
 
@@ -74,26 +72,35 @@ def _sanitize_llm_card(markdown: str) -> str:
     if m:
         text = m.group(1).strip()
 
-    # Detect duplicate frontmatter: two --- blocks stacked
-    if text.startswith("---"):
-        # Find the first closing ---
-        first_end = text.find("---", 3)
-        if first_end != -1:
-            after_first = text[first_end + 3:].lstrip("\n")
-            # Check if what follows is another frontmatter block
-            # (starts with --- or with bare 'yaml\n' then ---)
-            check = after_first
-            if check.startswith("yaml\n") or check.startswith("yaml\r\n"):
-                check = check.split("\n", 1)[1] if "\n" in check else check
-            if check.startswith("---"):
-                second_end = check.find("---", 3)
-                if second_end != -1:
-                    first_yaml = text[3:first_end].strip()
-                    second_yaml = check[3:second_end].strip()
-                    body = check[second_end + 3:]
-                    # Keep whichever block has more content
-                    keeper = second_yaml if len(second_yaml) > len(first_yaml) else first_yaml
-                    text = f"---\n{keeper}\n---{body}"
+    if not text.startswith("---"):
+        return text
+
+    # Extract ALL frontmatter blocks from the beginning of the text.
+    # Pattern: ---\n<yaml>\n--- possibly followed by more blocks with
+    # optional stray 'yaml'/'markdown' lines between them.
+    best_fm = ""
+    body = text
+    _STRAY_RE = re.compile(r"^(?:yaml|markdown)\r?\n", re.IGNORECASE)
+
+    while body.startswith("---"):
+        end_idx = body.find("---", 3)
+        if end_idx == -1:
+            break
+        fm_block = body[3:end_idx].strip()
+        after = body[end_idx + 3:].lstrip("\n")
+
+        # Keep the longest (most complete) frontmatter block
+        if len(fm_block) > len(best_fm):
+            best_fm = fm_block
+
+        body = after
+        # Strip stray code fence language markers between blocks
+        m_stray = _STRAY_RE.match(body)
+        if m_stray:
+            body = body[m_stray.end():]
+
+    if best_fm:
+        text = f"---\n{best_fm}\n---\n{body}"
 
     return text
 
@@ -275,7 +282,6 @@ async def suggest_card(
     db: Database = Depends(get_db),
     llm: LLMClient = Depends(get_llm_client),
     vault_root: Path = Depends(get_vault_root),
-    graph_resolver: GraphResolver = Depends(get_graph_resolver),
 ):
     """Generate a draft story card for an entity by searching exchanges and using LLM."""
     entity_name = body.entity_name
@@ -337,59 +343,24 @@ async def suggest_card(
             for r in rows
         )
 
-    # ---- Fetch related card content via graph ----
+    # Load related card content
     related_cards_section = ""
-    entity_id = await graph_resolver.resolve_entity(entity_name, rp_folder)
-    if entity_id:
-        connections = await graph_resolver.get_connections(
-            [entity_id], max_hops=2, max_results=8
-        )
-        if connections:
-            related_parts = []
-            for conn in connections:
-                # Hop 1: full content (directly related). Hop 2+: summary only.
-                body_text = conn.content or conn.summary
-                if body_text:
-                    # Truncate very large cards to keep prompt reasonable
-                    if len(body_text) > 2000:
-                        body_text = body_text[:2000] + "\n[...truncated]"
-                    relation = conn.connection_type.replace("_", " ")
-                    related_parts.append(
-                        f"### {conn.entity_name} ({conn.card_type}, {relation})\n{body_text}"
-                    )
-            if related_parts:
-                related_cards_section = (
-                    "## Existing related cards (use these for consistency — "
-                    "do NOT contradict established facts):\n\n"
-                    + "\n\n".join(related_parts)
+    if body.related_entities:
+        related_parts = []
+        for rel_name in body.related_entities:
+            row = await db.fetch_one(
+                "SELECT name, card_type, content FROM story_cards WHERE LOWER(name) = LOWER(?) AND rp_folder = ?",
+                [rel_name, rp_folder],
+            )
+            if row and row["content"]:
+                related_parts.append(
+                    f"### {row['name']} ({row['card_type']})\n{row['content']}"
                 )
-    else:
-        # Entity has no card yet — try resolving by name search in entity_connections
-        # to find any cards that reference this entity
-        conn_rows = await db.fetch_all(
-            """SELECT sc.name, sc.card_type, sc.content, sc.summary
-               FROM entity_connections ec
-               JOIN story_cards sc ON sc.id = ec.from_entity
-               WHERE LOWER(ec.to_entity) LIKE ?
-               LIMIT 5""",
-            [f"%{entity_name.lower()}%"],
-        )
-        if conn_rows:
-            related_parts = []
-            for row in conn_rows:
-                body_text = row["content"] or row["summary"] or ""
-                if body_text and len(body_text) > 2000:
-                    body_text = body_text[:2000] + "\n[...truncated]"
-                if body_text:
-                    related_parts.append(
-                        f"### {row['name']} ({row['card_type']})\n{body_text}"
-                    )
-            if related_parts:
-                related_cards_section = (
-                    "## Existing related cards (use these for consistency — "
-                    "do NOT contradict established facts):\n\n"
-                    + "\n\n".join(related_parts)
-                )
+        if related_parts:
+            related_cards_section = (
+                "## Related Cards (established lore — do NOT contradict)\n\n"
+                + "\n\n---\n\n".join(related_parts)
+            )
 
     # Load template
     template_map = {
@@ -424,18 +395,17 @@ async def suggest_card(
 
     prompt = f"""Create a story card for the entity "{entity_name}" (type: {card_type}).
 
-The card MUST start with exactly ONE YAML frontmatter block using these fields:
-```yaml
+The card MUST start with exactly ONE YAML frontmatter block (between --- delimiters) containing these fields:
+
 {template_frontmatter}
-```
 
 Then use this body structure as a guide (only include sections where evidence supports them):
 {template_body}
 
+{related_cards_section}
+
 Based on these narrative scenes where the entity appears:
 {evidence}
-
-{related_cards_section}
 
 {f"Additional context: {additional_context}" if additional_context else ""}
 
@@ -446,7 +416,7 @@ Instructions:
 - All card_id references (in connected_locations, known_by, etc.) MUST use the proper type prefix (loc_, npc_, char_, item_, org_, etc.).
 - Only populate body sections where the evidence supports it. Omit sections you have no information for rather than leaving them as empty placeholders.
 - Keep the same heading structure (## and ###) as the template for sections you do include.
-- You MUST be consistent with the related cards above. Do not invent facts that contradict what is established in existing cards. If a related card says something specific about this entity, respect that."""
+- You MUST be consistent with the related cards above. Do not invent facts that contradict established lore."""
 
     response = await llm.generate(
         messages=[{"role": "user", "content": prompt}],
@@ -827,6 +797,15 @@ async def create_card(
     if file_path.exists():
         raise HTTPException(409, detail=f"Card already exists: {card_id}")
 
+    # If content arrives with embedded frontmatter, extract and merge it
+    card_body = body.content
+    if card_body.lstrip().startswith("---"):
+        embedded_fm, stripped_body = parse_frontmatter(card_body.lstrip())
+        if embedded_fm:
+            # Merge embedded frontmatter (explicit body.frontmatter wins)
+            body.frontmatter = {**embedded_fm, **body.frontmatter}
+            card_body = stripped_body
+
     frontmatter = {"type": card_type, "card_id": card_id, "name": body.name, **body.frontmatter}
     frontmatter["card_id"] = card_id  # ensure card_id wins over any provided value
 
@@ -835,7 +814,7 @@ async def create_card(
     if not valid:
         logger.warning("Frontmatter validation errors for %s: %s", card_id, errors)
 
-    content = serialize_frontmatter(frontmatter, body.content)
+    content = serialize_frontmatter(frontmatter, card_body)
     file_path.write_text(content, encoding="utf-8")
 
     await indexer.index_file(rp_folder, file_path)

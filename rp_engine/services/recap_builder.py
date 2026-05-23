@@ -11,6 +11,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from rp_engine.config import get_config
 from rp_engine.database import Database
 from rp_engine.models.session import Recap
 from rp_engine.services.lance_store import LanceStore
@@ -104,7 +105,7 @@ class RecapBuilder:
             response = await self.llm_client.generate(
                 messages=[{"role": "user", "content": prompt}],
                 model=self.llm_client.models.card_generation,
-                temperature=0.5,
+                temperature=get_config().llm.temperatures.summary,
                 max_tokens=word_limit * 3,
             )
         except Exception as e:

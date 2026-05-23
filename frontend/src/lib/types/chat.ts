@@ -1,9 +1,13 @@
+export type MessageMode = 'rp' | 'ooc' | 'direction';
+
 export interface ChatMessage {
 	role: 'user' | 'assistant';
 	content: string;
 	timestamp: string;
 	exchange_id?: number;
 	exchange_number?: number;
+	branch?: string | null;
+	message_mode?: MessageMode;
 	has_variants?: boolean;
 	variant_count?: number;
 	continue_count?: number;
@@ -69,6 +73,7 @@ export interface VariantInfo {
 	is_active: boolean;
 	model_used: string | null;
 	temperature: number | null;
+	source: string;
 	continue_count: number;
 	created_at: string;
 }

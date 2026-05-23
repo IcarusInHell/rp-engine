@@ -201,34 +201,51 @@ class BranchManager:
             raise ValueError(f"Branch '{name}' already exists")
 
         # 2. Get branch point (caller-specified or latest exchange)
+        # branch_point_exchange=0 means "fresh start" — a new root branch with no parent,
+        # no inherited exchanges, no inherited state. Like creating a new "main".
         latest_exchange = await self.get_latest_exchange_number(rp_folder, source)
         if branch_point_exchange is not None:
             effective_branch_point = branch_point_exchange
         else:
             effective_branch_point = latest_exchange
 
-        active_session = await self.db.fetch_one(
-            """SELECT id FROM sessions WHERE rp_folder = ? AND branch = ?
-               AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1""",
-            [rp_folder, source],
-        )
-        session_id = active_session["id"] if active_session else None
+        # Fresh start: no parent, no session reference, no snapshots
+        is_fresh_start = effective_branch_point == 0
 
-        # 3. INSERT branch record
-        future = await self.db.enqueue_write(
-            """INSERT INTO branches (name, rp_folder, created_from, created_at,
-                   branch_point_session, branch_point_exchange, description, is_active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)""",
-            [name, rp_folder, source, now, session_id, effective_branch_point, description],
-            priority=PRIORITY_EXCHANGE,
-        )
-        await future
+        if is_fresh_start:
+            # Insert as a root branch (no parent)
+            future = await self.db.enqueue_write(
+                """INSERT INTO branches (name, rp_folder, created_from, created_at,
+                       branch_point_session, branch_point_exchange, description, is_active)
+                   VALUES (?, ?, NULL, ?, NULL, 0, ?, FALSE)""",
+                [name, rp_folder, now, description],
+                priority=PRIORITY_EXCHANGE,
+            )
+            await future
+            # No snapshots for fresh start — it's a clean slate
+        else:
+            active_session = await self.db.fetch_one(
+                """SELECT id FROM sessions WHERE rp_folder = ? AND branch = ?
+                   AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1""",
+                [rp_folder, source],
+            )
+            session_id = active_session["id"] if active_session else None
 
-        # 4. Snapshot trust baselines from source
-        await self._snapshot_trust_baselines(rp_folder, source, name, effective_branch_point, now)
+            # 3. INSERT branch record with parent
+            future = await self.db.enqueue_write(
+                """INSERT INTO branches (name, rp_folder, created_from, created_at,
+                       branch_point_session, branch_point_exchange, description, is_active)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, FALSE)""",
+                [name, rp_folder, source, now, session_id, effective_branch_point, description],
+                priority=PRIORITY_EXCHANGE,
+            )
+            await future
 
-        # 4b. Snapshot character, scene, and thread state entries
-        await self._snapshot_state_entries(rp_folder, source, name, effective_branch_point)
+            # 4. Snapshot trust baselines from source
+            await self._snapshot_trust_baselines(rp_folder, source, name, effective_branch_point, now)
+
+            # 4b. Snapshot character, scene, and thread state entries
+            await self._snapshot_state_entries(rp_folder, source, name, effective_branch_point)
 
         # 5. Activate the new branch + invalidate cache
         await self.switch_branch(name, rp_folder)
@@ -346,6 +363,19 @@ class BranchManager:
     # ===================================================================
     # Ancestry
     # ===================================================================
+
+    async def get_ancestry_chain(
+        self, rp_folder: str, branch: str
+    ) -> list[tuple[str, int]]:
+        """Get the branch ancestry chain: [(branch, max_exchange), ...].
+
+        Delegates to AncestryResolver (which has LRU caching).
+        Falls back to single-branch if no resolver is available.
+        """
+        if self.resolver:
+            return await self.resolver.get_ancestry_chain(rp_folder, branch)
+        # Fallback: current branch only, no cap
+        return [(branch, 2**31)]
 
     async def get_exchanges_with_ancestry(
         self, rp_folder: str, branch: str, limit: int = 5, max_depth: int = 5

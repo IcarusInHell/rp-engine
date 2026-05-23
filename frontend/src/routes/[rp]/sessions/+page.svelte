@@ -438,7 +438,7 @@
 						{:else if newExchangeNum === 0}
 							<div class="flex items-center gap-2 text-xs">
 								<span class="text-text-dim">Branch point:</span>
-								<span class="text-accent font-medium">Fresh start (no history)</span>
+								<span class="text-accent font-medium">Fresh start (new root, no parent)</span>
 								<button
 									class="text-text-dim hover:text-text transition-colors"
 									onclick={() => (newExchangeNum = null)}
@@ -448,6 +448,11 @@
 						{:else}
 							<div class="flex items-center gap-2 text-xs text-text-dim">
 								<span>Branch point: latest exchange</span>
+								<button
+									class="text-accent hover:text-accent/80 transition-colors"
+									onclick={() => (newExchangeNum = 0)}
+									title="Start with no inherited exchanges"
+								>or start fresh</button>
 							</div>
 						{/if}
 						<Btn primary small onclick={handleCreateBranch} disabled={creating || !newName.trim()}>{creating ? 'Creating...' : 'Create Branch'}</Btn>

@@ -22,11 +22,13 @@ export interface ExchangeDetail {
   id: number;
   exchange_number: number;
   session_id: string;
+  branch: string | null;
   user_message: string;
   assistant_response: string;
   in_story_timestamp: string | null;
   location: string | null;
   npcs_involved: string[] | null;
+  message_mode: 'rp' | 'ooc' | 'direction';
   analysis_status: string;
   created_at: string;
   metadata: Record<string, unknown> | null;
@@ -93,6 +95,15 @@ export interface BookmarkResponse {
 export interface BookmarkListResponse {
   bookmarks: BookmarkResponse[];
   total_count: number;
+}
+
+// --- Edit ---
+
+export interface ExchangeUpdate {
+  user_message?: string;
+  assistant_response?: string;
+  re_embed?: boolean;
+  re_analyze?: boolean;
 }
 
 // --- Annotations ---

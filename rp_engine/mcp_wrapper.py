@@ -89,9 +89,7 @@ TOOLS = [
             "briefs, scene state, character conditions, plot thread alerts, triggered "
             "notes, and current_exchange number (needed for save_exchange). The API does "
             "all intelligence -- entity extraction, keyword matching, graph traversal, "
-            "semantic search. You just send the raw user message. "
-            "Wrap RP narrative in <output> tags in last_response. Exchanges are "
-            "auto-saved when tags are present and active-rp is enabled."
+            "semantic search. You just send the raw user message."
         ),
         inputSchema={
             "type": "object",
@@ -125,8 +123,8 @@ TOOLS = [
     Tool(
         name="save_exchange",
         description=(
-            "Save a completed RP exchange to the database. For manual corrections only "
-            "-- normal flow uses auto-save via <output> tags in get_scene_context. "
+            "Save a completed RP exchange to the database. Call this after EVERY RP "
+            "narrative response to persist the exchange. "
             "IMPORTANT: assistant_response must contain ONLY the RP narrative "
             "text -- strip all thinking blocks, tool call results, and meta commentary. "
             "Do NOT call this for meta discussions, system questions, or out-of-character "
@@ -355,6 +353,11 @@ TOOLS = [
                 "additional_context": {
                     "type": "string",
                     "description": "Optional extra instructions or context for card generation.",
+                },
+                "related_entities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Names of existing cards to load as context. The LLM will see their full content and stay consistent with them.",
                 },
             },
             "required": ["entity_name", "card_type"],
@@ -595,6 +598,8 @@ async def handle_suggest_card(args: dict) -> list[TextContent]:
         body["rp_folder"] = rp_folder
     if args.get("additional_context"):
         body["additional_context"] = args["additional_context"]
+    if args.get("related_entities"):
+        body["related_entities"] = args["related_entities"]
     data = await api_post("/api/cards/suggest", json_body=body)
     return _json_result(data)
 

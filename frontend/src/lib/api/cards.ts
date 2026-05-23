@@ -36,11 +36,13 @@ export async function reindex(): Promise<ReindexResponse> {
 export async function suggestCard(
 	entity_name: string,
 	card_type: string,
-	additional_context?: string
+	additional_context?: string,
+	rp_folder?: string,
+	related_entities?: string[]
 ): Promise<SuggestCardResponse> {
 	return apiFetch<SuggestCardResponse>('/api/cards/suggest', {
 		method: 'POST',
-		body: JSON.stringify({ entity_name, card_type, additional_context }),
+		body: JSON.stringify({ entity_name, card_type, additional_context, rp_folder, related_entities }),
 	});
 }
 

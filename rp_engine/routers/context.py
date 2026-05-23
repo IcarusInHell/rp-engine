@@ -53,8 +53,9 @@ async def get_context(
 ):
     """The main endpoint. Smart API, dumb client.
 
-    When auto-save is enabled and last_response contains <output> tags,
+    When auto-save is enabled (deprecated) and last_response contains <output> tags,
     the previous exchange is auto-saved before returning context.
+    Preferred: clients call save_exchange explicitly after every RP response.
     """
     auto_saved = None
     if auto_save is not None:

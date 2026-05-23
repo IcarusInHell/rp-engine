@@ -54,7 +54,7 @@ async def chat(
     kwargs = dict(
         user_message=body.user_message,
         rp_folder=rp_folder, branch=branch, session_id=session_id,
-        ooc=body.ooc,
+        message_mode=body.message_mode,
         attach_card_ids=body.attach_card_ids,
         scene_override=body.scene_override,
     )
@@ -170,6 +170,7 @@ async def list_variants(
                 is_active=bool(v["is_active"]),
                 model_used=v.get("model_used"),
                 temperature=v.get("temperature"),
+                source=v.get("source", "llm"),
                 continue_count=v.get("continue_count", 0),
                 created_at=v["created_at"],
             )

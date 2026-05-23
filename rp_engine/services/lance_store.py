@@ -23,6 +23,37 @@ def _lance_escape(val: str) -> str:
     """Escape quotes in values interpolated into LanceDB .where() filters."""
     return val.replace("\\", "\\\\").replace('"', '\\"')
 
+
+def _build_ancestry_where(
+    rp_folder: str,
+    branch: str,
+    max_exchange: int | None = None,
+    ancestry_chain: list[tuple[str, int]] | None = None,
+) -> str:
+    """Build a LanceDB WHERE clause, optionally spanning ancestor branches.
+
+    If ``ancestry_chain`` is provided, produces a compound OR filter:
+    ``rp_folder = "X" AND ((branch = "child" AND exchange_number <= N) OR ...)``
+    """
+    rp_filter = f'rp_folder = "{_lance_escape(rp_folder)}"'
+
+    if ancestry_chain:
+        clauses: list[str] = []
+        for chain_branch, chain_max in ancestry_chain:
+            cap = chain_max
+            if chain_branch == branch and max_exchange is not None:
+                cap = min(cap, max_exchange)
+            clauses.append(
+                f'(branch = "{_lance_escape(chain_branch)}" AND exchange_number <= {int(cap)})'
+            )
+        return f"{rp_filter} AND ({' OR '.join(clauses)})"
+
+    # Single-branch fallback
+    where = f'{rp_filter} AND branch = "{_lance_escape(branch)}"'
+    if max_exchange is not None:
+        where += f" AND exchange_number <= {int(max_exchange)}"
+    return where
+
 # Schema for exchange vectors
 EXCHANGE_SCHEMA = pa.schema([
     ("text", pa.string()),
@@ -210,8 +241,13 @@ class LanceStore:
         branch: str = "main",
         limit: int = 5,
         max_exchange: int | None = None,
+        ancestry_chain: list[tuple[str, int]] | None = None,
     ) -> list[LanceSearchResult]:
-        """Search exchange vectors for relevant past conversations."""
+        """Search exchange vectors for relevant past conversations.
+
+        If ``ancestry_chain`` is provided, searches across all ancestor branches
+        using a compound OR filter. Each entry is ``(branch_name, max_exchange_number)``.
+        """
         if self._embed_fn is None or self._exchange_table is None:
             return []
 
@@ -224,9 +260,7 @@ class LanceStore:
 
         try:
             def _search():
-                where = f'rp_folder = "{_lance_escape(rp_folder)}" AND branch = "{_lance_escape(branch)}"'
-                if max_exchange is not None:
-                    where += f" AND exchange_number <= {int(max_exchange)}"
+                where = _build_ancestry_where(rp_folder, branch, max_exchange, ancestry_chain)
                 return (
                     self._exchange_table.search(query_vec)
                     .where(where)

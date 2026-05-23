@@ -23,7 +23,7 @@ export type NarrativeVoice = 'first' | 'third';
 export type Tense = 'present' | 'past';
 export type ScenePacing = 'slow' | 'moderate' | 'fast';
 export const SCENE_PACING: ScenePacing[] = ['slow', 'moderate', 'fast'];
-export type ResponseLength = 'short' | 'medium' | 'long';
+export type ResponseLength = 'short' | 'medium' | 'long' | 'variable';
 
 // Memory
 export type EmotionalTone = 'positive' | 'negative' | 'complex' | 'neutral' | 'traumatic';

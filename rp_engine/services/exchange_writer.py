@@ -30,6 +30,49 @@ class ExchangeWriter:
         self._bg_tasks: set[asyncio.Task] = set()
         self.diagnostic_logger = None  # injected by container
 
+    async def _re_embed_exchange(
+        self,
+        exchange_number: int,
+        user_message: str,
+        assistant_response: str,
+        rp_folder: str,
+        branch: str,
+        session_id: str,
+        *,
+        delete_existing: bool = False,
+    ) -> None:
+        """Re-embed an exchange in the background. Respects per-RP chunking config.
+
+        If delete_existing is True, removes old vectors first (for updates).
+        """
+        if self.lance_store is None:
+            return
+
+        async def _embed():
+            try:
+                chunking = await get_effective_chunking(self.db, rp_folder)
+                if delete_existing:
+                    await self.lance_store.delete_exchange_vectors(
+                        rp_folder, branch, exchange_number,
+                    )
+                await self.lance_store.embed_exchange(
+                    exchange_number=exchange_number,
+                    user_message=user_message,
+                    assistant_response=assistant_response,
+                    rp_folder=rp_folder,
+                    branch=branch,
+                    session_id=session_id,
+                    chunking_strategy=chunking.strategy,
+                    chunk_size=chunking.chunk_size,
+                    chunk_overlap=chunking.chunk_overlap,
+                )
+            except Exception as e:
+                logger.warning("Exchange %d embedding failed: %s", exchange_number, e)
+
+        task = asyncio.create_task(_embed())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
     async def save_exchange(
         self,
         session_id: str,
@@ -45,6 +88,7 @@ class ExchangeWriter:
         idempotency_key: str | None = None,
         embed: bool = True,
         analyze: bool = True,
+        message_mode: str = "rp",
     ) -> tuple[int, int]:
         """Insert exchange, return (exchange_id, exchange_number).
 
@@ -63,31 +107,36 @@ class ExchangeWriter:
             future = await self.db.enqueue_write(
                 """INSERT INTO exchanges (session_id, rp_folder, branch, exchange_number,
                    user_message, assistant_response, in_story_timestamp, location,
-                   analysis_status, created_at, metadata, idempotency_key)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
+                   analysis_status, created_at, metadata, idempotency_key, message_mode)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
                 [
                     session_id, rp_folder, branch, exchange_number,
                     user_message, assistant_response,
                     in_story_timestamp, location,
-                    now, metadata_json, idempotency_key,
+                    now, metadata_json, idempotency_key, message_mode,
                 ],
                 priority=PRIORITY_EXCHANGE,
             )
         else:
-            # Atomic exchange number assignment
+            # Atomic exchange number assignment — considers both existing
+            # exchanges on this branch AND the branch_point_exchange from
+            # the parent so new branches continue numbering from the fork.
             future = await self.db.enqueue_write(
                 """INSERT INTO exchanges (session_id, rp_folder, branch, exchange_number,
                    user_message, assistant_response, in_story_timestamp, location,
-                   analysis_status, created_at, metadata, idempotency_key)
+                   analysis_status, created_at, metadata, idempotency_key, message_mode)
                    VALUES (?, ?, ?, COALESCE(
-                       (SELECT MAX(exchange_number) FROM exchanges WHERE rp_folder = ? AND branch = ?), 0
-                   ) + 1, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
+                       (SELECT MAX(exchange_number) FROM exchanges WHERE rp_folder = ? AND branch = ?),
+                       (SELECT branch_point_exchange FROM branches WHERE name = ? AND rp_folder = ?),
+                       0
+                   ) + 1, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
                 [
                     session_id, rp_folder, branch,
                     rp_folder, branch,
+                    branch, rp_folder,
                     user_message, assistant_response,
                     in_story_timestamp, location,
-                    now, metadata_json, idempotency_key,
+                    now, metadata_json, idempotency_key, message_mode,
                 ],
                 priority=PRIORITY_EXCHANGE,
             )
@@ -103,26 +152,11 @@ class ExchangeWriter:
             )
 
         # Background vector embedding (respects per-RP chunking config)
-        if embed and self.lance_store is not None:
-            async def _embed():
-                try:
-                    chunking = await get_effective_chunking(self.db, rp_folder)
-                    await self.lance_store.embed_exchange(
-                        exchange_number=actual_number,
-                        user_message=user_message,
-                        assistant_response=assistant_response,
-                        rp_folder=rp_folder,
-                        branch=branch,
-                        session_id=session_id,
-                        chunking_strategy=chunking.strategy,
-                        chunk_size=chunking.chunk_size,
-                        chunk_overlap=chunking.chunk_overlap,
-                    )
-                except Exception as e:
-                    logger.warning("Exchange embedding failed: %s", e)
-            task = asyncio.create_task(_embed())
-            self._bg_tasks.add(task)
-            task.add_done_callback(self._bg_tasks.discard)
+        if embed:
+            await self._re_embed_exchange(
+                actual_number, user_message, assistant_response,
+                rp_folder, branch, session_id,
+            )
 
         # Enqueue for analysis
         if analyze and self.analysis_pipeline is not None:
@@ -183,29 +217,12 @@ class ExchangeWriter:
         user_message = exchange["user_message"]
 
         # Re-embed (respects per-RP chunking config)
-        if re_embed and self.lance_store is not None:
-            async def _re_embed():
-                try:
-                    chunking = await get_effective_chunking(self.db, rp_folder)
-                    await self.lance_store.delete_exchange_vectors(
-                        rp_folder, branch, exchange_number,
-                    )
-                    await self.lance_store.embed_exchange(
-                        exchange_number=exchange_number,
-                        user_message=user_message,
-                        assistant_response=new_response,
-                        rp_folder=rp_folder,
-                        branch=branch,
-                        session_id=session_id,
-                        chunking_strategy=chunking.strategy,
-                        chunk_size=chunking.chunk_size,
-                        chunk_overlap=chunking.chunk_overlap,
-                    )
-                except Exception as e:
-                    logger.warning("Re-embedding exchange %d failed: %s", exchange_number, e)
-            task = asyncio.create_task(_re_embed())
-            self._bg_tasks.add(task)
-            task.add_done_callback(self._bg_tasks.discard)
+        if re_embed:
+            await self._re_embed_exchange(
+                exchange_number, user_message, new_response,
+                rp_folder, branch, session_id,
+                delete_existing=True,
+            )
 
         # Re-analyze
         if re_analyze and self.analysis_pipeline is not None:
@@ -215,3 +232,143 @@ class ExchangeWriter:
             await self.analysis_pipeline.enqueue(exchange_id, rp_folder, branch)
 
         logger.info("Exchange %d (id=%d) response updated", exchange_number, exchange_id)
+
+    async def update_exchange(
+        self,
+        exchange_number: int,
+        rp_folder: str,
+        branch: str,
+        *,
+        user_message: str | None = None,
+        assistant_response: str | None = None,
+        re_embed: bool = True,
+        re_analyze: bool = False,
+    ) -> dict:
+        """Edit an exchange's user message and/or assistant response.
+
+        For assistant_response: creates a new variant with source='manual_edit',
+        marks it active, updates the main exchange, and optionally re-analyzes.
+        For user_message: direct DB update + re-embed.
+
+        Returns the updated exchange row.
+        """
+        exchange = await self.db.fetch_one(
+            "SELECT * FROM exchanges WHERE rp_folder = ? AND branch = ? AND exchange_number = ?",
+            [rp_folder, branch, exchange_number],
+        )
+        if not exchange:
+            raise ValueError(
+                f"Exchange {exchange_number} not found in {rp_folder}/{branch}"
+            )
+
+        exchange_id = exchange["id"]
+        updated_user = user_message if user_message is not None else exchange["user_message"]
+        updated_response = assistant_response if assistant_response is not None else exchange["assistant_response"]
+
+        # --- Update user_message ---
+        if user_message is not None:
+            f = await self.db.enqueue_write(
+                "UPDATE exchanges SET user_message = ? WHERE id = ?",
+                [user_message, exchange_id],
+                priority=PRIORITY_EXCHANGE,
+            )
+            await f
+
+        # --- Update assistant_response (via variant) ---
+        if assistant_response is not None:
+            # Ensure original response is saved as variant 0 if no variants exist
+            variant_count = await self.db.fetch_val(
+                "SELECT COUNT(*) FROM exchange_variants WHERE exchange_id = ?",
+                [exchange_id],
+            )
+            if variant_count == 0:
+                f = await self.db.enqueue_write(
+                    """INSERT INTO exchange_variants
+                       (exchange_id, rp_folder, branch, exchange_number,
+                        assistant_response, model_used, temperature, source,
+                        is_active, created_at)
+                       VALUES (?, ?, ?, ?, ?, NULL, NULL, 'llm', 0, ?)""",
+                    [
+                        exchange_id, rp_folder, branch,
+                        exchange_number, exchange["assistant_response"],
+                        exchange["created_at"],
+                    ],
+                    priority=PRIORITY_EXCHANGE,
+                )
+                await f
+
+            # Deactivate all existing variants
+            f = await self.db.enqueue_write(
+                "UPDATE exchange_variants SET is_active = 0 WHERE exchange_id = ?",
+                [exchange_id],
+                priority=PRIORITY_EXCHANGE,
+            )
+            await f
+
+            # Insert new variant with source='manual_edit'
+            now = datetime.now(UTC).isoformat()
+            f = await self.db.enqueue_write(
+                """INSERT INTO exchange_variants
+                   (exchange_id, rp_folder, branch, exchange_number,
+                    assistant_response, model_used, temperature, source,
+                    is_active, created_at)
+                   VALUES (?, ?, ?, ?, ?, NULL, NULL, 'manual_edit', 1, ?)""",
+                [
+                    exchange_id, rp_folder, branch,
+                    exchange_number, assistant_response, now,
+                ],
+                priority=PRIORITY_EXCHANGE,
+            )
+            await f
+
+            # Update main exchange table
+            f = await self.db.enqueue_write(
+                "UPDATE exchanges SET assistant_response = ? WHERE id = ?",
+                [assistant_response, exchange_id],
+                priority=PRIORITY_EXCHANGE,
+            )
+            await f
+
+        # --- Re-embed ---
+        if re_embed:
+            await self._re_embed_exchange(
+                exchange_number, updated_user, updated_response,
+                rp_folder, branch, exchange["session_id"],
+                delete_existing=True,
+            )
+
+        # --- Re-analyze (undo old + enqueue new) ---
+        if re_analyze and assistant_response is not None and self.analysis_pipeline is not None:
+            await self.analysis_pipeline.undo_exchange_analysis(
+                exchange_number, rp_folder, branch, cascade=False,
+            )
+            await self.analysis_pipeline.enqueue(exchange_id, rp_folder, branch)
+
+        logger.info(
+            "Exchange %d edited (user=%s, assistant=%s, re_analyze=%s)",
+            exchange_number,
+            user_message is not None,
+            assistant_response is not None,
+            re_analyze,
+        )
+
+        if self.diagnostic_logger:
+            self.diagnostic_logger.log(
+                category="state",
+                event="exchange_edited",
+                data={
+                    "exchange_id": exchange_id,
+                    "exchange_number": exchange_number,
+                    "rp_folder": rp_folder,
+                    "branch": branch,
+                    "edited_user": user_message is not None,
+                    "edited_assistant": assistant_response is not None,
+                    "re_embed": re_embed,
+                    "re_analyze": re_analyze,
+                },
+            )
+
+        # Return updated exchange
+        return await self.db.fetch_one(
+            "SELECT * FROM exchanges WHERE id = ?", [exchange_id],
+        )

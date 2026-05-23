@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { suggestCard, listCards, createCard, reindex } from '$lib/api/cards';
 	import { addToast } from '$lib/stores/ui';
+	import yaml from 'js-yaml';
 	import type { StoryCardSummary, SuggestCardResponse, CardType } from '$lib/types';
 	import { CARD_TYPES } from '$lib/types';
 	import Btn from '$lib/components/ui/Btn.svelte';
@@ -9,6 +11,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 
 	import { ARCHETYPES, MODIFIERS } from '$lib/constants/archetypes';
+
+	let rpFolder = $derived($page.params.rp ?? '');
 
 	// Form inputs
 	let entityName = $state('');
@@ -124,14 +128,6 @@
 			parts.push('Character framework:\n' + lines.join('\n'));
 		}
 
-		// Relations context
-		if (relations.length > 0) {
-			const relLines = relations.map(
-				(r) => `- ${r.name} (${r.card_type})${r.summary ? ': ' + r.summary : ''}`
-			);
-			parts.push('Related entities:\n' + relLines.join('\n'));
-		}
-
 		// Build on previous
 		if (buildOnPrevious && previousOutput) {
 			parts.push('Previous generation:\n' + previousOutput.markdown);
@@ -153,7 +149,8 @@
 		generating = true;
 		try {
 			const context = buildContext() || undefined;
-			const result = await suggestCard(entityName.trim(), cardType, context);
+			const relatedNames = relations.map((r) => r.name);
+			const result = await suggestCard(entityName.trim(), cardType, context, rpFolder, relatedNames);
 			result.markdown = stripCodeFences(result.markdown);
 			// Store previous for "build on previous"
 			if (output) previousOutput = output;
@@ -181,7 +178,8 @@
 				output.markdown +
 				'\n\nInstructions: ' +
 				prompt.trim();
-			const result = await suggestCard(entityName.trim(), cardType, alterContext);
+			const relatedNames = relations.map((r) => r.name);
+			const result = await suggestCard(entityName.trim(), cardType, alterContext, rpFolder, relatedNames);
 			result.markdown = stripCodeFences(result.markdown);
 			previousOutput = output;
 			output = result;
@@ -192,13 +190,30 @@
 		}
 	}
 
+	/** Parse frontmatter from markdown so we send structured data to the API. */
+	function parseFrontmatter(md: string): { frontmatter: Record<string, unknown>; body: string } {
+		const match = md.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+		if (!match) return { frontmatter: {}, body: md };
+		try {
+			const fm = yaml.load(match[1]);
+			return {
+				frontmatter: (fm && typeof fm === 'object') ? fm as Record<string, unknown> : {},
+				body: match[2].trim(),
+			};
+		} catch {
+			return { frontmatter: {}, body: md };
+		}
+	}
+
 	async function saveCard() {
 		if (!output) return;
 		saving = true;
 		try {
+			const { frontmatter, body } = parseFrontmatter(output.markdown);
 			await createCard(output.card_type, {
 				name: output.entity_name,
-				content: output.markdown,
+				frontmatter,
+				content: body,
 			});
 			await reindex();
 			addToast(`Card "${output.entity_name}" saved and indexed`, 'success');

@@ -12,8 +12,14 @@ export interface AppConfig {
 		};
 		fallback_model: string;
 		mode: { chat: 'provider' | 'sdk' };
+		temperatures?: {
+			chat: number;
+			chat_regenerate_bump: number;
+			npc_reactions: number;
+			summary: number;
+		};
 	};
-	chat: { exchange_window: number; model: string | null; temperature: number; max_tokens: number };
+	chat: { exchange_window: number; model: string | null; temperature: number; max_tokens: number; max_variants: number };
 	context: { max_documents: number; max_graph_hops: number; stale_threshold_turns: number };
 	search: {
 		vector_weight: number;

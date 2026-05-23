@@ -20,7 +20,7 @@ import logging
 from collections import Counter
 from datetime import UTC, datetime
 
-from rp_engine.config import AnalysisConfig, TrustConfig
+from rp_engine.config import AnalysisConfig, TrustConfig, get_config
 from rp_engine.database import PRIORITY_ANALYSIS, Database
 from rp_engine.models.analysis import AnalysisResult
 from rp_engine.models.state import CharacterUpdate, SceneUpdate
@@ -60,7 +60,7 @@ class AnalysisPipeline:
         state_manager: StateManager,
         thread_tracker: ThreadTracker,
         timestamp_tracker: TimestampTracker,
-        trust_config: TrustConfig,
+        trust_config: TrustConfig | None = None,
         lance_store=None,
         continuity_checker=None,
         custom_state_manager=None,
@@ -71,15 +71,31 @@ class AnalysisPipeline:
         self.state_manager = state_manager
         self.thread_tracker = thread_tracker
         self.timestamp_tracker = timestamp_tracker
-        self.trust_config = trust_config
+        self._trust_config_override: TrustConfig | None = trust_config
         self.lance_store = lance_store
         self.continuity_checker = continuity_checker
         self.custom_state_manager = custom_state_manager
-        self.analysis_config = analysis_config or AnalysisConfig()
+        self._analysis_config_override: AnalysisConfig | None = analysis_config
         self._queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue()
         self._consumer_task: asyncio.Task | None = None
         self._running = False
         self.diagnostic_logger = None  # injected by container
+
+    @property
+    def trust_config(self) -> TrustConfig:
+        """Read trust config dynamically so hot-reloaded changes take effect."""
+        override = getattr(self, "_trust_config_override", None)
+        if override is not None:
+            return override
+        return get_config().trust
+
+    @property
+    def analysis_config(self) -> AnalysisConfig:
+        """Read analysis config dynamically so hot-reloaded changes take effect."""
+        override = getattr(self, "_analysis_config_override", None)
+        if override is not None:
+            return override
+        return get_config().analysis
 
     def start(self) -> None:
         """Start the consumer loop."""

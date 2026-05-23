@@ -84,6 +84,26 @@ class AncestryResolver:
         self._ancestry_cache.put(cache_key, chain)
         return chain
 
+    @staticmethod
+    def build_ancestry_sql(
+        rp_folder: str,
+        chain: list[tuple[str, int]],
+        table_alias: str = "",
+    ) -> tuple[str, list]:
+        """Build a parameterized SQL WHERE clause from an ancestry chain.
+
+        Returns ``(where_clause, params)`` suitable for an exchanges query.
+        ``table_alias`` is prepended to column names (e.g. ``"e"`` → ``e.branch``).
+        """
+        prefix = f"{table_alias}." if table_alias else ""
+        clauses: list[str] = []
+        params: list = []
+        for chain_branch, max_exchange in chain:
+            clauses.append(f"({prefix}branch = ? AND {prefix}exchange_number <= ?)")
+            params.extend([chain_branch, max_exchange])
+        where = f"{prefix}rp_folder = ? AND ({' OR '.join(clauses)})"
+        return where, [rp_folder] + params
+
     def invalidate_cache(self, rp_folder: str | None = None, branch: str | None = None) -> None:
         """Clear ancestry chain cache.
 

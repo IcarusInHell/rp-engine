@@ -1,5 +1,9 @@
 """Auto-save service — automatically saves RP exchanges when <output> tags are present.
 
+DEPRECATED: Auto-save via <output> tags is deprecated. The preferred flow is for
+clients to call save_exchange explicitly after every RP response. This service is
+retained for backward compatibility but is disabled by default (AutoSaveConfig.enabled=False).
+
 When get_scene_context is called with last_response containing <output>...</output> tags,
 the previous exchange is auto-saved before returning context for the new turn.
 """
@@ -48,7 +52,12 @@ class AutoSaveResult:
 
 
 class AutoSaveManager:
-    """Manages automatic exchange saving when <output> tags are present."""
+    """Manages automatic exchange saving when <output> tags are present.
+
+    .. deprecated::
+        Use explicit ``save_exchange`` calls instead. This manager is disabled
+        by default and will be removed in a future major version.
+    """
 
     def __init__(self, db: Database, exchange_writer: ExchangeWriter) -> None:
         self.db = db

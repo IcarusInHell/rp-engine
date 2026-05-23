@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from rp_engine.config import ContextConfig
+from rp_engine.config import ContextConfig, get_config
 from rp_engine.database import PRIORITY_ANALYSIS, Database
 from rp_engine.models.context import (
     CardGap,
@@ -69,8 +69,8 @@ class ContextEngine:
         graph_resolver: GraphResolver,
         vector_search: VectorSearch,
         trigger_evaluator: TriggerEvaluator,
-        config: ContextConfig,
-        vault_root: Path,
+        config: ContextConfig | None = None,
+        vault_root: Path = Path("."),
         guidelines_service: GuidelinesService | None = None,
         npc_brief_builder: NPCBriefBuilder | None = None,
         npc_engine: Any | None = None,
@@ -83,7 +83,7 @@ class ContextEngine:
         self.graph_resolver = graph_resolver
         self.vector_search = vector_search
         self.trigger_evaluator = trigger_evaluator
-        self.config = config
+        self._config_override: ContextConfig | None = config
         self.vault_root = vault_root
         self.guidelines_service = guidelines_service or GuidelinesService(vault_root)
         self.npc_brief_builder = npc_brief_builder or NPCBriefBuilder()
@@ -93,6 +93,17 @@ class ContextEngine:
         self.branch_manager = None
         self.writing_intelligence = None
         self.diagnostic_logger = None  # injected by container
+
+    @property
+    def config(self) -> ContextConfig:
+        """Read context config dynamically so hot-reloaded changes take effect.
+
+        Tests can pass a custom ContextConfig at construction to override.
+        Production code passes None; the property reads from get_config().
+        """
+        if self._config_override is not None:
+            return self._config_override
+        return get_config().context
 
     def configure(self, **kwargs: Any) -> None:
         """Set late-bound dependencies (avoids monkey-patching attributes)."""
@@ -453,12 +464,22 @@ class ContextEngine:
             [rp_folder, branch],
         )
 
-        exchanges = await self.db.fetch_all(
-            """SELECT exchange_number, user_message, assistant_response, in_story_timestamp
-               FROM exchanges WHERE rp_folder = ? AND branch = ?
-               ORDER BY exchange_number DESC LIMIT 3""",
-            [rp_folder, branch],
-        )
+        # Use ancestry-aware exchange query so branches see parent history
+        if self.branch_manager:
+            ancestry_rows = await self.branch_manager.get_exchanges_with_ancestry(
+                rp_folder, branch, limit=3
+            )
+            exchanges = [
+                {k: r[k] for k in ("exchange_number", "user_message", "assistant_response", "in_story_timestamp") if k in dict(r)}
+                for r in ancestry_rows
+            ]
+        else:
+            exchanges = await self.db.fetch_all(
+                """SELECT exchange_number, user_message, assistant_response, in_story_timestamp
+                   FROM exchanges WHERE rp_folder = ? AND branch = ?
+                   ORDER BY exchange_number DESC LIMIT 3""",
+                [rp_folder, branch],
+            )
 
         threads = await self.db.fetch_all(
             """SELECT pt.name, pt.status, pt.phase, COALESCE(tc.current_counter, 0) as counter
@@ -492,12 +513,18 @@ class ContextEngine:
             return []
 
         try:
+            # Get ancestry chain for cross-branch search
+            ancestry_chain = None
+            if self.branch_manager:
+                ancestry_chain = await self.branch_manager.get_ancestry_chain(rp_folder, branch)
+
             results = await self.lance_store.search_exchanges(
                 query_text=user_message,
                 rp_folder=rp_folder,
                 branch=branch,
                 limit=self.config.max_past_exchanges * 2,
                 max_exchange=current_exchange,
+                ancestry_chain=ancestry_chain,
             )
         except Exception as e:
             logger.warning("Past exchange search failed: %s", e)

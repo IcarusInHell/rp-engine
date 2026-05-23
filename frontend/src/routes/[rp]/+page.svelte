@@ -141,7 +141,7 @@
 			<PageHeader title={$activeRP?.rp_folder ?? 'RP Overview'} size="md" subtitle="{totalCards} story card{totalCards !== 1 ? 's' : ''}">
 				{#snippet actions()}
 					<a
-						href="/{$activeRP?.rp_folder}/settings"
+						href="/{$activeRP?.rp_folder}/dashboard?tool=settings"
 						class="text-text-dim hover:text-accent transition-colors"
 						title="RP Settings"
 					>

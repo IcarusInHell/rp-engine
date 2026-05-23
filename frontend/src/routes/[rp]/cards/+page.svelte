@@ -227,7 +227,21 @@
 					lines.push(`${key}: []`);
 				} else {
 					lines.push(`${key}:`);
-					for (const item of val) lines.push(`  - ${item}`);
+					for (const item of val) {
+						if (item && typeof item === 'object') {
+							// Nested object: render as YAML mapping under the list item
+							const entries = Object.entries(item as Record<string, unknown>);
+							if (entries.length > 0) {
+								const [firstKey, firstVal] = entries[0];
+								lines.push(`  - ${firstKey}: ${firstVal}`);
+								for (let i = 1; i < entries.length; i++) {
+									lines.push(`    ${entries[i][0]}: ${entries[i][1]}`);
+								}
+							}
+						} else {
+							lines.push(`  - ${item}`);
+						}
+					}
 				}
 			} else if (typeof val === 'object') {
 				lines.push(`${key}: ${JSON.stringify(val)}`);

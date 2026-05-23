@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, model_validator
 
 
 class SceneOverride(BaseModel):
@@ -13,9 +15,17 @@ class SceneOverride(BaseModel):
 class ChatRequest(BaseModel):
     user_message: str
     stream: bool = False
-    ooc: bool = False
+    message_mode: Literal["rp", "ooc", "direction"] = "rp"
+    ooc: bool = False  # deprecated — use message_mode="ooc" instead
     attach_card_ids: list[str] = []
     scene_override: SceneOverride | None = None
+
+    @model_validator(mode="after")
+    def _compat_ooc_flag(self) -> ChatRequest:
+        """Map deprecated ooc=True to message_mode='ooc' for backward compat."""
+        if self.ooc and self.message_mode == "rp":
+            self.message_mode = "ooc"
+        return self
 
 
 class ChatResponse(BaseModel):
@@ -70,6 +80,7 @@ class VariantInfo(BaseModel):
     is_active: bool
     model_used: str | None = None
     temperature: float | None = None
+    source: str = "llm"
     continue_count: int = 0
     created_at: str
 

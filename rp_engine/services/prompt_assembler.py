@@ -12,9 +12,17 @@ import logging
 import re
 from pathlib import Path
 
-from rp_engine.config import ChatConfig
+from rp_engine.config import ChatConfig, get_config
+from rp_engine.constants.prompt_guidance import (
+    RESPONSE_LENGTH_GUIDANCE,
+    SCENE_PACING_GUIDANCE,
+    build_content_boundaries,
+    build_pov_section,
+    build_user_narrative_guidance,
+)
 from rp_engine.database import Database
 from rp_engine.models.context import ContextResponse
+from rp_engine.services.ancestry_resolver import AncestryResolver
 from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.utils.frontmatter import parse_file
 
@@ -36,12 +44,25 @@ class PromptAssembler:
         vault_root: Path,
         db: Database,
         guidelines_service: GuidelinesService,
-        config: ChatConfig,
+        config: ChatConfig | None = None,
+        ancestry_resolver: AncestryResolver | None = None,
     ) -> None:
         self.vault_root = vault_root
         self.db = db
         self.guidelines_service = guidelines_service
-        self.config = config
+        self._config_override: ChatConfig | None = config
+        self.ancestry_resolver = ancestry_resolver
+
+    @property
+    def config(self) -> ChatConfig:
+        """Read chat config dynamically so hot-reloaded changes take effect.
+
+        Tests can pass a custom ChatConfig at construction to override.
+        Production code passes None; the property reads from get_config().
+        """
+        if self._config_override is not None:
+            return self._config_override
+        return get_config().chat
 
     # ------------------------------------------------------------------
     # Static section builders (extracted from routers/context.py)
@@ -148,12 +169,17 @@ class PromptAssembler:
             if frontmatter:
                 sections["rp_guidelines"] = {
                     "pov_mode": frontmatter.get("pov_mode"),
+                    "pov_character": frontmatter.get("pov_character"),
                     "dual_characters": frontmatter.get("dual_characters", []),
                     "narrative_voice": frontmatter.get("narrative_voice"),
                     "tense": frontmatter.get("tense"),
                     "tone": frontmatter.get("tone"),
                     "scene_pacing": frontmatter.get("scene_pacing"),
                     "response_length": frontmatter.get("response_length"),
+                    "integrate_user_narrative": frontmatter.get("integrate_user_narrative", False),
+                    "preserve_user_details": frontmatter.get("preserve_user_details", False),
+                    "sensitive_themes": frontmatter.get("sensitive_themes", []),
+                    "hard_limits": frontmatter.get("hard_limits"),
                 }
             if body and body.strip():
                 cleaned = _strip_comments(body)
@@ -210,16 +236,33 @@ class PromptAssembler:
         body = sections.get("rp_guidelines_body")
         if rp_guide or body:
             parts.append("\n\n# RP Guidelines\n")
-            # Compact frontmatter metadata line
+            # Compact frontmatter metadata line (with expanded guidance)
             if rp_guide:
                 meta_parts = []
-                for key, label in [
-                    ("pov_mode", "POV"), ("narrative_voice", "Voice"),
-                    ("tense", "Tense"), ("scene_pacing", "Pacing"),
-                    ("response_length", "Length"),
-                ]:
-                    if rp_guide.get(key):
-                        meta_parts.append(f"{label}: {rp_guide[key]}")
+                if rp_guide.get("pov_mode"):
+                    meta_parts.append(f"POV: {rp_guide['pov_mode']}")
+                if rp_guide.get("narrative_voice"):
+                    meta_parts.append(f"Voice: {rp_guide['narrative_voice']}")
+                if rp_guide.get("tense"):
+                    meta_parts.append(f"Tense: {rp_guide['tense']}")
+
+                # Expanded scene pacing
+                pacing = rp_guide.get("scene_pacing")
+                if pacing:
+                    pacing_desc = SCENE_PACING_GUIDANCE.get(pacing, pacing)
+                    meta_parts.append(f"Pacing: {pacing} ({pacing_desc})")
+
+                # Expanded response length with word-count range
+                length = rp_guide.get("response_length")
+                if length:
+                    length_desc = RESPONSE_LENGTH_GUIDANCE.get(length, length)
+                    meta_parts.append(f"Length: {length} ({length_desc})")
+                    # Dual mode note
+                    if rp_guide.get("pov_mode") == "dual" and length != "variable":
+                        meta_parts.append(
+                            "Note: length target is per character section, not overall"
+                        )
+
                 if rp_guide.get("tone"):
                     tone = rp_guide["tone"]
                     meta_parts.append(f"Tone: {', '.join(tone) if isinstance(tone, list) else tone}")
@@ -227,6 +270,32 @@ class PromptAssembler:
                     meta_parts.append(f"Dual: {', '.join(rp_guide['dual_characters'])}")
                 if meta_parts:
                     parts.append(" | ".join(meta_parts))
+
+                # POV instructions (after metadata, before body)
+                pov_section = build_pov_section(
+                    pov_mode=rp_guide.get("pov_mode"),
+                    pov_character=rp_guide.get("pov_character") or None,
+                    dual_characters=rp_guide.get("dual_characters"),
+                )
+                if pov_section:
+                    parts.append(f"\n{pov_section}")
+
+                # Content boundaries (sensitive themes + hard limits)
+                boundaries = build_content_boundaries(
+                    sensitive_themes=rp_guide.get("sensitive_themes"),
+                    hard_limits=rp_guide.get("hard_limits"),
+                )
+                if boundaries:
+                    parts.append(f"\n{boundaries}")
+
+                # User-narrative integration
+                narrative_line = build_user_narrative_guidance(
+                    integrate_user_narrative=bool(rp_guide.get("integrate_user_narrative")),
+                    preserve_user_details=bool(rp_guide.get("preserve_user_details")),
+                )
+                if narrative_line:
+                    parts.append(f"\n{narrative_line}")
+
             # Full body content (user's custom prompt instructions)
             if body:
                 parts.append("\n")
@@ -422,28 +491,57 @@ class PromptAssembler:
         branch: str,
         session_id: str | None = None,
         limit: int | None = None,
+        exclude_exchange_number: int | None = None,
     ) -> list[dict]:
         """Fetch recent exchanges from DB, ordered oldest-first.
 
-        Returns list of dicts with 'user_message' and 'assistant_response' keys.
+        When an ancestry_resolver is available and no session_id is given,
+        walks the branch ancestry chain so child branches see parent history.
+        Sessions are branch-specific, so ancestry is skipped when session_id is set.
+
+        Returns list of dicts with 'user_message', 'assistant_response', and
+        'message_mode' keys.
         """
         n = limit or self.config.exchange_window
 
         if session_id:
+            # Sessions are branch-specific — flat query, no ancestry
+            where = "rp_folder = ? AND branch = ? AND session_id = ?"
+            params: list = [rp_folder, branch, session_id]
+            if exclude_exchange_number is not None:
+                where += " AND exchange_number != ?"
+                params.append(exclude_exchange_number)
             rows = await self.db.fetch_all(
-                """SELECT user_message, assistant_response
-                   FROM exchanges
-                   WHERE rp_folder = ? AND branch = ? AND session_id = ?
-                   ORDER BY exchange_number DESC LIMIT ?""",
-                [rp_folder, branch, session_id, n],
+                f"""SELECT user_message, assistant_response, message_mode
+                    FROM exchanges WHERE {where}
+                    ORDER BY exchange_number DESC LIMIT ?""",
+                params + [n],
+            )
+        elif self.ancestry_resolver:
+            # Ancestry-aware: include parent branch exchanges
+            chain = await self.ancestry_resolver.get_ancestry_chain(rp_folder, branch)
+            ancestry_where, params = AncestryResolver.build_ancestry_sql(rp_folder, chain)
+            if exclude_exchange_number is not None:
+                ancestry_where += " AND exchange_number != ?"
+                params.append(exclude_exchange_number)
+            rows = await self.db.fetch_all(
+                f"""SELECT user_message, assistant_response, message_mode
+                    FROM exchanges WHERE {ancestry_where}
+                    ORDER BY exchange_number DESC LIMIT ?""",
+                params + [n],
             )
         else:
+            # Flat query (no ancestry resolver available)
+            where = "rp_folder = ? AND branch = ?"
+            params = [rp_folder, branch]
+            if exclude_exchange_number is not None:
+                where += " AND exchange_number != ?"
+                params.append(exclude_exchange_number)
             rows = await self.db.fetch_all(
-                """SELECT user_message, assistant_response
-                   FROM exchanges
-                   WHERE rp_folder = ? AND branch = ?
-                   ORDER BY exchange_number DESC LIMIT ?""",
-                [rp_folder, branch, n],
+                f"""SELECT user_message, assistant_response, message_mode
+                    FROM exchanges WHERE {where}
+                    ORDER BY exchange_number DESC LIMIT ?""",
+                params + [n],
             )
 
         # Reverse to oldest-first order
@@ -457,6 +555,7 @@ class PromptAssembler:
         context_response: ContextResponse | None = None,
         session_id: str | None = None,
         exchange_limit: int | None = None,
+        exclude_exchange_number: int | None = None,
     ) -> list[dict]:
         """Build a complete LLM-ready message list.
 
@@ -468,10 +567,17 @@ class PromptAssembler:
 
         # Add recent exchange history
         exchanges = await self.get_recent_exchanges(
-            rp_folder, branch, session_id, exchange_limit
+            rp_folder, branch, session_id, exchange_limit,
+            exclude_exchange_number=exclude_exchange_number,
         )
         for ex in exchanges:
-            if ex.get("user_message"):
+            mode = ex.get("message_mode", "rp")
+            if mode == "direction" and ex.get("user_message"):
+                # Direction exchanges: inject user message as system guidance
+                # so the LLM remembers ongoing direction
+                from rp_engine.utils.direction import build_direction_message
+                messages.append(build_direction_message(ex["user_message"]))
+            elif ex.get("user_message"):
                 messages.append({"role": "user", "content": ex["user_message"]})
             if ex.get("assistant_response"):
                 messages.append({"role": "assistant", "content": ex["assistant_response"]})

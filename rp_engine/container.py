@@ -130,7 +130,7 @@ class ServiceContainer:
         )
         # VectorSearch uses LLMClient.embed as its embed_fn — single key holder
         vector_search = VectorSearch(
-            db, config.search,
+            db,
             embed_fn=llm_client.embed,
             embedding_model=config.llm.models.embeddings,
         )
@@ -168,15 +168,15 @@ class ServiceContainer:
         )
         await lance_store.initialize()
 
+        ancestry_resolver = AncestryResolver(db)
+
         prompt_assembler = PromptAssembler(
             vault_root=vault_root,
             db=db,
             guidelines_service=guidelines_service,
-            config=config.chat,
+            ancestry_resolver=ancestry_resolver,
         )
-
-        ancestry_resolver = AncestryResolver(db)
-        state_manager = StateManager(db=db, config=config.trust, resolver=ancestry_resolver)
+        state_manager = StateManager(db=db, resolver=ancestry_resolver)
 
         # NPC/Writing Intelligence (optional deps)
         npc_intelligence = None
@@ -224,7 +224,6 @@ class ServiceContainer:
             graph_resolver=graph_resolver,
             vector_search=vector_search,
             trigger_evaluator=trigger_evaluator,
-            config=config.context,
             vault_root=vault_root,
             guidelines_service=guidelines_service,
             npc_brief_builder=npc_brief_builder,
@@ -264,11 +263,9 @@ class ServiceContainer:
             state_manager=state_manager,
             thread_tracker=thread_tracker,
             timestamp_tracker=timestamp_tracker,
-            trust_config=config.trust,
             lance_store=lance_store,
             continuity_checker=continuity_checker,
             custom_state_manager=custom_state_manager,
-            analysis_config=config.analysis,
         )
 
         exchange_writer = ExchangeWriter(db=db, analysis_pipeline=analysis_pipeline, lance_store=lance_store)
@@ -297,7 +294,6 @@ class ServiceContainer:
             prompt_assembler=prompt_assembler,
             llm_client=llm_client,
             exchange_writer=exchange_writer,
-            config=config.chat,
         )
 
         return cls(

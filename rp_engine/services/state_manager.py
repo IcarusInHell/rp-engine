@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from rp_engine.config import ModifierTrustEffect, TrustConfig
+from rp_engine.config import ModifierTrustEffect, TrustConfig, get_config
 from rp_engine.database import PRIORITY_ANALYSIS, Database
 from rp_engine.models.context import SceneState
 from rp_engine.models.state import (
@@ -47,11 +47,22 @@ class StateManager:
     Uses AncestryResolver for branch-aware state resolution.
     """
 
-    def __init__(self, db: Database, config: TrustConfig, resolver: AncestryResolver | None = None) -> None:
+    def __init__(self, db: Database, config: TrustConfig | None = None, resolver: AncestryResolver | None = None) -> None:
         self.db = db
-        self.config = config
+        self._config_override: TrustConfig | None = config
         self.resolver = resolver
         self.diagnostic_logger = None  # injected by container
+
+    @property
+    def config(self) -> TrustConfig:
+        """Read trust config dynamically so hot-reloaded changes take effect.
+
+        Tests can pass a custom TrustConfig at construction to override.
+        Production code passes None; the property reads from get_config().
+        """
+        if self._config_override is not None:
+            return self._config_override
+        return get_config().trust
 
     # ===================================================================
     # Exchange Number Resolution

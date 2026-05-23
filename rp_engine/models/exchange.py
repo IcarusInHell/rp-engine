@@ -4,7 +4,18 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
+
+
+def validate_response_content(v: str) -> str:
+    """Reject responses containing meta content that should be stripped before saving."""
+    if re.search(r"<thinking>", v, re.IGNORECASE):
+        raise ValueError("Response contains <thinking> tags. Strip before saving.")
+    if re.search(r'\{"tool_calls":', v):
+        raise ValueError("Response contains tool call blocks. Strip before saving.")
+    if re.search(r"<system-reminder>", v, re.IGNORECASE):
+        raise ValueError("Response contains system instructions. Strip before saving.")
+    return v
 
 
 class ExchangeSave(BaseModel):
@@ -21,13 +32,28 @@ class ExchangeSave(BaseModel):
     @field_validator("assistant_response")
     @classmethod
     def validate_no_meta_content(cls, v: str) -> str:
-        if re.search(r"<thinking>", v, re.IGNORECASE):
-            raise ValueError("Response contains <thinking> tags. Strip before saving.")
-        if re.search(r'\{"tool_calls":', v):
-            raise ValueError("Response contains tool call blocks. Strip before saving.")
-        if re.search(r"<system-reminder>", v, re.IGNORECASE):
-            raise ValueError("Response contains system instructions. Strip before saving.")
+        return validate_response_content(v)
+
+
+class ExchangeUpdate(BaseModel):
+    """Request body for editing an exchange's user message and/or assistant response."""
+    user_message: str | None = None
+    assistant_response: str | None = None
+    re_embed: bool = True
+    re_analyze: bool = False
+
+    @field_validator("assistant_response")
+    @classmethod
+    def validate_no_meta_content(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_response_content(v)
         return v
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> ExchangeUpdate:
+        if self.user_message is None and self.assistant_response is None:
+            raise ValueError("At least one of user_message or assistant_response must be set")
+        return self
 
 
 class ExchangeResponse(BaseModel):
@@ -44,11 +70,13 @@ class ExchangeDetail(BaseModel):
     id: int
     exchange_number: int
     session_id: str
+    branch: str | None = None
     user_message: str
     assistant_response: str
     in_story_timestamp: str | None = None
     location: str | None = None
     npcs_involved: list[str] | None = None
+    message_mode: str = "rp"
     analysis_status: str = "pending"
     created_at: str
     metadata: dict | None = None

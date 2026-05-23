@@ -13,7 +13,7 @@ import logging
 import re
 from pathlib import Path
 
-from rp_engine.config import RPEngineConfig
+from rp_engine.config import RPEngineConfig, get_config
 from rp_engine.database import Database
 from rp_engine.models.npc import (
     NPCListItem,
@@ -293,7 +293,7 @@ class NPCEngine:
                 {"role": "user", "content": full_context},
             ],
             model=model,
-            temperature=0.6,
+            temperature=get_config().llm.temperatures.npc_reactions,
             max_tokens=1500,
             response_format={"type": "json_object"},
         )
