@@ -96,6 +96,14 @@ class ExchangeWriter:
         """
         now = datetime.now(UTC).isoformat()
 
+        # NOTE (vestigial idempotency): the `idempotency_key` column + unique index
+        # are a dormant exactly-once-save feature from the legacy CC-hooks era. No
+        # client ever sends `idempotency_key` (the router front-door check is
+        # unreachable), so this falls back to a content hash on every save. The
+        # back-door content-hash de-dup would raise IntegrityError/500 on a real
+        # collision (there is no ON CONFLICT). Its only remaining value — guarding
+        # the agent/MCP save path against tool-call replay — is moot now that path
+        # is being deprecated. Left intentionally inert; do not resurrect.
         if not idempotency_key:
             idempotency_key = hash_content(user_message + assistant_response)[:16]
 

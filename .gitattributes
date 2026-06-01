@@ -1,0 +1,5 @@
+# Paths tracked in git for development but stripped from release archives
+# (git archive / GitHub release tarballs / "Download ZIP").
+# They remain available on `git clone` and in CI.
+tests/        export-ignore
+.gitattributes export-ignore

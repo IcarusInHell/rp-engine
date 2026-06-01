@@ -92,7 +92,7 @@
 	let sceneLocation = $state('');
 	let sceneMood = $state('');
 	let attachedCardIds: string[] = $state([]);
-	let availableCards: { card_id: string; name: string; card_type: string }[] = $state([]);
+	let availableCards: { id: string; name: string; card_type: string }[] = $state([]);
 	let showCardPicker = $state(false);
 
 	function exchangesToMessages(exchanges: ExchangeDetail[]): ChatMessage[] {
@@ -703,7 +703,7 @@
 	async function loadAvailableCards() {
 		try {
 			const res = await listCards();
-			availableCards = res.cards.map((c: any) => ({ card_id: c.card_id, name: c.name, card_type: c.card_type }));
+			availableCards = res.cards.map((c: any) => ({ id: c.id, name: c.name, card_type: c.card_type }));
 		} catch {
 			// Non-critical
 		}
@@ -1374,8 +1374,8 @@
 									<label class="flex items-center gap-2 text-xs py-0.5 cursor-pointer hover:bg-bg-subtle rounded px-1">
 										<input
 											type="checkbox"
-											checked={attachedCardIds.includes(card.card_id)}
-											onchange={() => toggleCardAttachment(card.card_id)}
+											checked={attachedCardIds.includes(card.id)}
+											onchange={() => toggleCardAttachment(card.id)}
 											class="accent-accent"
 										/>
 										<span class="text-text">{card.name}</span>

@@ -185,6 +185,7 @@ class AnalysisResult(BaseModel):
     characters_updated: int = 0
     trust_changes: int = 0
     events_added: int = 0
+    memories_added: int = 0
     card_gaps_added: int = 0
     thread_alerts: int = 0
     continuity_warnings: int = 0

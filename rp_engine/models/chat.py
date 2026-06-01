@@ -34,6 +34,9 @@ class ChatResponse(BaseModel):
     exchange_number: int
     session_id: str
     context_summary: dict | None = None
+    # True for OOC turns (not persisted as an exchange). Mirrors the streaming
+    # done-event's ooc=True so both paths are detectable by the same flag.
+    ooc: bool = False
 
 
 class ChatStreamEvent(BaseModel):

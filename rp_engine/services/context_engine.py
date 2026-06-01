@@ -126,6 +126,9 @@ class ContextEngine:
         if last_response is None:
             last_response = await self._get_last_response(rp_folder, branch)
 
+        # POV/PC character — resolved once; used by custom-state and NPC-brief stages.
+        pc_name = request.pov_character or get_config().rp.default_pov_character
+
         # ---- Stage 1: Extraction + Classification (no LLM) ----
         extraction, signals = await asyncio.gather(
             self.entity_extractor.extract(
@@ -177,10 +180,8 @@ class ContextEngine:
         # ---- Stage 2.5a: Custom State Retrieval ----
         custom_state_blocks: list[CustomStateBlock] = []
         if self.config.include_custom_state and self.custom_state_manager:
-            from rp_engine.config import get_config
-            pov = request.pov_character or get_config().rp.default_pov_character
             custom_state_blocks = await self._get_all_custom_state(
-                rp_folder, branch, pov
+                rp_folder, branch, pc_name
             )
 
         # ---- Stage 2.5: Trigger Evaluation (no LLM) ----
@@ -204,187 +205,19 @@ class ContextEngine:
                 trigger_card_ids.append(ft.inject_card_path)
 
         # ---- Stage 3: Graph Expansion + Ranking ----
-        # Merge all card sources
-        all_cards: dict[str, tuple[dict, str, float]] = {}  # entity_id → (card, source, score)
-
-        # Always-load cards
-        for card in always_load_cards:
-            all_cards[card["id"]] = (card, "always_load", 2.0)
-
-        # Keyword matches
-        for card in keyword_cards:
-            eid = card["id"]
-            if eid not in all_cards or all_cards[eid][2] < 1.0:
-                all_cards[eid] = (card, "keyword", 1.0)
-
-        # Semantic results
-        for sr in semantic_results:
-            # Look up entity by file_path
-            card = await self.db.fetch_one(
-                "SELECT id, name, card_type, file_path, content, summary, content_hash FROM story_cards WHERE file_path = ?",
-                [sr.file_path],
-            )
-            if card and card["id"] not in all_cards:
-                all_cards[card["id"]] = (card, "semantic", 0.8)
-
-        # Trigger card references
-        for card_path in trigger_card_ids:
-            card = await self.db.fetch_one(
-                "SELECT id, name, card_type, file_path, content, summary, content_hash FROM story_cards WHERE file_path = ?",
-                [card_path],
-            )
-            if card and card["id"] not in all_cards:
-                all_cards[card["id"]] = (card, "trigger", 0.9)
-
-        # Graph expansion from matched entities
-        seed_ids = [m.entity_id for m in extraction.matched_entities]
-        if seed_ids:
-            graph_connections = await self.graph_resolver.get_connections(
-                seed_ids, max_hops=self.config.max_graph_hops
-            )
-            for conn in graph_connections:
-                if conn.entity_id not in all_cards:
-                    graph_score = 0.6 if conn.hop == 1 else 0.3
-                    card = await self.db.fetch_one(
-                        "SELECT id, name, card_type, file_path, content, summary, content_hash FROM story_cards WHERE id = ?",
-                        [conn.entity_id],
-                    )
-                    if card:
-                        all_cards[conn.entity_id] = (card, "graph", graph_score)
-
-        # Rank and limit
-        ranked = sorted(all_cards.items(), key=lambda x: x[1][2], reverse=True)
-        top_cards = ranked[: self.config.max_documents]
+        top_cards = await self._collect_and_rank_cards(
+            extraction, always_load_cards, keyword_cards, semantic_results, trigger_card_ids
+        )
 
         # ---- Stage 3.5: Context Sent Filtering ----
-        documents: list[ContextDocument] = []
-        references: list[ContextReference] = []
-
-        for entity_id, (card, source, score) in top_cards:
-            content_hash = card.get("content_hash") or _hash_content(card.get("content", ""))
-            sent_row = None
-            if session_id:
-                sent_row = await self.db.fetch_one(
-                    "SELECT content_hash, sent_at_turn FROM context_sent WHERE session_id = ? AND entity_id = ?",
-                    [session_id, entity_id],
-                )
-
-            if sent_row:
-                old_hash = sent_row["content_hash"]
-                sent_turn = sent_row["sent_at_turn"]
-
-                if old_hash == content_hash and (current_turn - sent_turn) < self.config.stale_threshold_turns:
-                    # Already sent, unchanged, within stale window → reference
-                    references.append(ContextReference(
-                        name=card["name"],
-                        card_type=card["card_type"],
-                        sent_at_turn=sent_turn,
-                    ))
-                    continue
-                else:
-                    status = "updated" if old_hash != content_hash else "new"
-            else:
-                status = "new"
-
-            documents.append(ContextDocument(
-                name=card["name"],
-                card_type=card["card_type"],
-                file_path=card.get("file_path", ""),
-                source=source,
-                relevance_score=score,
-                content=card.get("content") if source != "graph" or score >= 0.6 else None,
-                summary=card.get("summary") if source == "graph" and score < 0.6 else None,
-                status=status,
-            ))
-
-            # Record sent (await to ensure committed before next read)
-            if session_id:
-                now = datetime.now(UTC).isoformat()
-                future = await self.db.enqueue_write(
-                    """INSERT OR REPLACE INTO context_sent
-                           (session_id, entity_id, content_hash, sent_at_turn, sent_at)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    [session_id, entity_id, content_hash, current_turn, now],
-                    priority=PRIORITY_ANALYSIS,
-                )
-                await future
+        documents, references = await self._filter_sent_cards(
+            top_cards, session_id, current_turn
+        )
 
         # ---- Stage 4: NPC Handling (no LLM in Phase 2) ----
-        npc_briefs: list[NPCBrief] = []
-        flagged_npcs: list[FlaggedNPC] = []
-        signal_list = list(signals.keys())
-
-        # All detected NPCs (active + referenced)
-        all_npcs = {n.entity_id: n for n in extraction.active_npcs}
-        for n in extraction.referenced_npcs:
-            if n.entity_id not in all_npcs:
-                all_npcs[n.entity_id] = n
-
-        # Batch-fetch card data, runtime state, and trust for all detected NPCs
-        npc_ids = list(all_npcs.keys())
-        card_map: dict[str, dict] = {}
-        runtime_map: dict[str, dict] = {}
-        trust_map: dict[tuple[str, str], int] = {}  # (char_a_lower, char_b_lower) -> trust score
-
-        if npc_ids:
-            # Batch card data
-            placeholders = ",".join("?" for _ in npc_ids)
-            card_rows = await self.db.fetch_all(
-                f"SELECT id, importance, frontmatter FROM story_cards WHERE id IN ({placeholders})",
-                npc_ids,
-            )
-            for row in card_rows:
-                card_map[row["id"]] = row
-
-            # Batch runtime state (latest per card_id)
-            batch_states = await latest_character_states_batch(
-                self.db, rp_folder, branch, npc_ids
-            )
-            runtime_map = batch_states
-
-            # Batch trust: baselines + modification sums
-            npc_names_lower = {npc.name.lower() for npc in all_npcs.values()}
-            trust_pairs = await fetch_trust_map(self.db, rp_folder, branch)
-            for (ca, cb), (baseline, mod_sum) in trust_pairs.items():
-                if ca in npc_names_lower or cb in npc_names_lower:
-                    trust_map[(ca, cb)] = baseline + mod_sum
-
-        active_npc_ids = {n.entity_id for n in extraction.active_npcs}
-
-        for npc_id, npc in all_npcs.items():
-            sc_row = card_map.get(npc_id)
-            card_fm = safe_parse_json(sc_row.get("frontmatter")) if sc_row else {}
-            importance = (sc_row["importance"] if sc_row else None) or card_fm.get("importance")
-
-            runtime = runtime_map.get(npc_id)
-
-            char_row = {
-                "importance": importance,
-                "primary_archetype": card_fm.get("primary_archetype"),
-                "secondary_archetype": card_fm.get("secondary_archetype"),
-                "behavioral_modifiers": card_fm.get("behavioral_modifiers"),
-                "emotional_state": runtime["emotional_state"] if runtime else None,
-                "conditions": runtime["conditions"] if runtime else None,
-            }
-
-            if importance and importance in BRIEF_IMPORTANCE:
-                # Sum trust from all pairs involving this NPC
-                npc_lower = npc.name.lower()
-                pre_trust = sum(
-                    score for (ca, cb), score in trust_map.items()
-                    if ca == npc_lower or cb == npc_lower
-                )
-                brief = self.npc_brief_builder.build_brief(
-                    npc.name, char_row, pre_trust, signal_list
-                )
-                npc_briefs.append(brief)
-            else:
-                reason = "active_in_scene" if npc_id in active_npc_ids else "mentioned"
-                flagged_npcs.append(FlaggedNPC(
-                    character=npc.name,
-                    importance=importance,
-                    reason=reason,
-                ))
+        npc_briefs, flagged_npcs = await self._build_npc_briefs(
+            extraction, signals, pc_name, rp_folder, branch
+        )
 
         # ---- Stage 4b: Background NPC Reactions (Phase 3) ----
         npc_reactions = []
@@ -443,6 +276,247 @@ class ContextEngine:
             warnings=warnings,
             writing_constraints=writing_constraints,
         )
+
+    async def _collect_and_rank_cards(
+        self,
+        extraction,
+        always_load_cards: list[dict],
+        keyword_cards: list[dict],
+        semantic_results,
+        trigger_card_ids: list[str],
+    ) -> list[tuple[str, tuple[dict, str, float]]]:
+        """Stage 3: merge all card sources, graph-expand, rank by score, and limit.
+
+        Source precedence is insertion-order-based (first writer of an entity_id
+        wins its slot): always_load (2.0) → keyword (1.0) → semantic (0.8) →
+        trigger (0.9) → graph (0.6/0.3). The final ranking is by score descending.
+        """
+        # Merge all card sources
+        all_cards: dict[str, tuple[dict, str, float]] = {}  # entity_id → (card, source, score)
+
+        # Always-load cards
+        for card in always_load_cards:
+            all_cards[card["id"]] = (card, "always_load", 2.0)
+
+        # Keyword matches
+        for card in keyword_cards:
+            eid = card["id"]
+            if eid not in all_cards or all_cards[eid][2] < 1.0:
+                all_cards[eid] = (card, "keyword", 1.0)
+
+        # Semantic + trigger cards are both keyed by file_path — batch them into a
+        # single IN(?) lookup (item E: was one fetch_one per result), then apply the
+        # per-source guards in the SAME order (semantic before trigger) so insertion
+        # precedence is byte-identical to the per-card version.
+        _CARD_COLS = "id, name, card_type, file_path, content, summary, content_hash"
+        wanted_paths = [sr.file_path for sr in semantic_results] + list(trigger_card_ids)
+        cards_by_path: dict[str, dict] = {}
+        if wanted_paths:
+            ph = ",".join("?" for _ in wanted_paths)
+            for row in await self.db.fetch_all(
+                f"SELECT {_CARD_COLS} FROM story_cards WHERE file_path IN ({ph})",
+                wanted_paths,
+            ):
+                cards_by_path[row["file_path"]] = row
+
+        # Semantic results
+        for sr in semantic_results:
+            card = cards_by_path.get(sr.file_path)
+            if card and card["id"] not in all_cards:
+                all_cards[card["id"]] = (card, "semantic", 0.8)
+
+        # Trigger card references
+        for card_path in trigger_card_ids:
+            card = cards_by_path.get(card_path)
+            if card and card["id"] not in all_cards:
+                all_cards[card["id"]] = (card, "trigger", 0.9)
+
+        # Graph expansion from matched entities
+        seed_ids = [m.entity_id for m in extraction.matched_entities]
+        if seed_ids:
+            graph_connections = await self.graph_resolver.get_connections(
+                seed_ids, max_hops=self.config.max_graph_hops
+            )
+            # Batch the graph card lookups (item E): fetch every not-yet-seen
+            # connection target by id in one IN(?) query, then insert in connection
+            # order (first occurrence of an entity_id keeps its hop-based score).
+            graph_ids = [
+                conn.entity_id for conn in graph_connections
+                if conn.entity_id not in all_cards
+            ]
+            cards_by_id: dict[str, dict] = {}
+            if graph_ids:
+                ph = ",".join("?" for _ in graph_ids)
+                for row in await self.db.fetch_all(
+                    f"SELECT {_CARD_COLS} FROM story_cards WHERE id IN ({ph})",
+                    graph_ids,
+                ):
+                    cards_by_id[row["id"]] = row
+            for conn in graph_connections:
+                if conn.entity_id not in all_cards:
+                    card = cards_by_id.get(conn.entity_id)
+                    if card:
+                        graph_score = 0.6 if conn.hop == 1 else 0.3
+                        all_cards[conn.entity_id] = (card, "graph", graph_score)
+
+        # Rank and limit
+        ranked = sorted(all_cards.items(), key=lambda x: x[1][2], reverse=True)
+        return ranked[: self.config.max_documents]
+
+    async def _filter_sent_cards(
+        self,
+        top_cards: list[tuple[str, tuple[dict, str, float]]],
+        session_id: str | None,
+        current_turn: int,
+    ) -> tuple[list[ContextDocument], list[ContextReference]]:
+        """Stage 3.5: dedup against context_sent — emit fresh/updated cards as
+        documents, already-sent-and-unchanged cards as references."""
+        documents: list[ContextDocument] = []
+        references: list[ContextReference] = []
+
+        for entity_id, (card, source, score) in top_cards:
+            content_hash = card.get("content_hash") or _hash_content(card.get("content", ""))
+            sent_row = None
+            if session_id:
+                sent_row = await self.db.fetch_one(
+                    "SELECT content_hash, sent_at_turn FROM context_sent WHERE session_id = ? AND entity_id = ?",
+                    [session_id, entity_id],
+                )
+
+            if sent_row:
+                old_hash = sent_row["content_hash"]
+                sent_turn = sent_row["sent_at_turn"]
+
+                if old_hash == content_hash and (current_turn - sent_turn) < self.config.stale_threshold_turns:
+                    # Already sent, unchanged, within stale window → reference
+                    references.append(ContextReference(
+                        name=card["name"],
+                        card_type=card["card_type"],
+                        sent_at_turn=sent_turn,
+                    ))
+                    continue
+                else:
+                    status = "updated" if old_hash != content_hash else "new"
+            else:
+                status = "new"
+
+            documents.append(ContextDocument(
+                name=card["name"],
+                card_type=card["card_type"],
+                file_path=card.get("file_path", ""),
+                source=source,
+                relevance_score=score,
+                content=card.get("content") if source != "graph" or score >= 0.6 else None,
+                summary=card.get("summary") if source == "graph" and score < 0.6 else None,
+                status=status,
+            ))
+
+            # Record sent (await to ensure committed before next read)
+            if session_id:
+                now = datetime.now(UTC).isoformat()
+                future = await self.db.enqueue_write(
+                    """INSERT OR REPLACE INTO context_sent
+                           (session_id, entity_id, content_hash, sent_at_turn, sent_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    [session_id, entity_id, content_hash, current_turn, now],
+                    priority=PRIORITY_ANALYSIS,
+                )
+                await future
+
+        return documents, references
+
+    async def _build_npc_briefs(
+        self,
+        extraction,
+        signals: dict,
+        pc_name: str,
+        rp_folder: str,
+        branch: str,
+    ) -> tuple[list[NPCBrief], list[FlaggedNPC]]:
+        """Stage 4: full briefs for important NPCs, flags for the rest.
+
+        Batch-fetches card data, runtime state, and the trust map for every detected
+        NPC, then builds a brief (importance ∈ BRIEF_IMPORTANCE) or a FlaggedNPC.
+        """
+        npc_briefs: list[NPCBrief] = []
+        flagged_npcs: list[FlaggedNPC] = []
+        signal_list = list(signals.keys())
+
+        # All detected NPCs (active + referenced)
+        all_npcs = {n.entity_id: n for n in extraction.active_npcs}
+        for n in extraction.referenced_npcs:
+            if n.entity_id not in all_npcs:
+                all_npcs[n.entity_id] = n
+
+        # Batch-fetch card data, runtime state, and trust for all detected NPCs
+        npc_ids = list(all_npcs.keys())
+        card_map: dict[str, dict] = {}
+        runtime_map: dict[str, dict] = {}
+        trust_map: dict[tuple[str, str], int] = {}  # (char_a_lower, char_b_lower) -> trust score
+
+        if npc_ids:
+            # Batch card data
+            placeholders = ",".join("?" for _ in npc_ids)
+            card_rows = await self.db.fetch_all(
+                f"SELECT id, importance, frontmatter FROM story_cards WHERE id IN ({placeholders})",
+                npc_ids,
+            )
+            for row in card_rows:
+                card_map[row["id"]] = row
+
+            # Batch runtime state (latest per card_id)
+            batch_states = await latest_character_states_batch(
+                self.db, rp_folder, branch, npc_ids
+            )
+            runtime_map = batch_states
+
+            # Batch trust: baselines + modification sums
+            npc_names_lower = {npc.name.lower() for npc in all_npcs.values()}
+            trust_pairs = await fetch_trust_map(self.db, rp_folder, branch)
+            for (ca, cb), (baseline, mod_sum) in trust_pairs.items():
+                if ca in npc_names_lower or cb in npc_names_lower:
+                    trust_map[(ca, cb)] = baseline + mod_sum
+
+        active_npc_ids = {n.entity_id for n in extraction.active_npcs}
+
+        for npc_id, npc in all_npcs.items():
+            sc_row = card_map.get(npc_id)
+            card_fm = safe_parse_json(sc_row.get("frontmatter")) if sc_row else {}
+            importance = (sc_row["importance"] if sc_row else None) or card_fm.get("importance")
+
+            runtime = runtime_map.get(npc_id)
+
+            char_row = {
+                "importance": importance,
+                "primary_archetype": card_fm.get("primary_archetype"),
+                "secondary_archetype": card_fm.get("secondary_archetype"),
+                "behavioral_modifiers": card_fm.get("behavioral_modifiers"),
+                "emotional_state": runtime["emotional_state"] if runtime else None,
+                "conditions": runtime["conditions"] if runtime else None,
+            }
+
+            if importance and importance in BRIEF_IMPORTANCE:
+                # B1 (directional): the brief's pre_trust is npc → pc — "how much THIS
+                # NPC trusts the PC". The old code summed every pair touching the NPC
+                # (both directions, all partners), conflating unrelated relationships;
+                # a sorted-key lookup would likewise merge npc→pc with pc→npc. trust_map
+                # already includes the (npc, pc) row (its build filters to npc-touching
+                # pairs). pc_name is resolved once in get_context.
+                npc_lower = npc.name.lower()
+                pre_trust = trust_map.get((npc_lower, pc_name.lower()), 0)
+                brief = self.npc_brief_builder.build_brief(
+                    npc.name, char_row, pre_trust, signal_list
+                )
+                npc_briefs.append(brief)
+            else:
+                reason = "active_in_scene" if npc_id in active_npc_ids else "mentioned"
+                flagged_npcs.append(FlaggedNPC(
+                    character=npc.name,
+                    importance=importance,
+                    reason=reason,
+                ))
+
+        return npc_briefs, flagged_npcs
 
     async def get_continuity_brief(self, rp_folder: str, branch: str) -> dict:
         """Data-only continuity brief: scene, characters, recent exchanges, threads."""

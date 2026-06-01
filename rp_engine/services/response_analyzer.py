@@ -147,6 +147,11 @@ Analyze the following {len(exchanges)} exchanges and identify:
      * NEVER use generic descriptors like "Man", "The Man", "Unknown Man", "Unnamed Man", "Other Character", "The Stranger", "Figure", "Person"
      * If a character is referred to by a nickname (like "Beasty" for Dante), use their REAL name, not the nickname
      * If you can't identify the character's actual name, SKIP that entry entirely
+     * ORDER MATTERS — trust is DIRECTIONAL. List exactly two names as [TRUSTER, TRUSTED]:
+       the FIRST is the character whose feelings changed (the one doing the trusting/distrusting),
+       the SECOND is the character they now trust more or less. Example: if Dante earns Lilith's
+       trust by protecting her, write ["Lilith Graves", "Dante Moretti"] (Lilith → Dante), NOT the
+       reverse. For a mutual change, emit two separate entries, one in each direction.
    - Change type - choose carefully:
      * trust_increase: Character genuinely helped, protected, showed vulnerability, or earned respect
      * trust_decrease: Character ACTUALLY BETRAYED, lied maliciously, or broke a promise (rare!)

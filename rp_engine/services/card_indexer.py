@@ -6,10 +6,12 @@ Two-pass indexing: (1) build entity+alias maps, (2) extract connections.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
-from datetime import UTC
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +103,25 @@ CONNECTION_RULES: list[tuple[str, str, str]] = [
 ]
 
 
+@dataclass(slots=True)
+class CardData:
+    """Parsed representation of one story card .md file (no DB access)."""
+
+    entity_id: str
+    rp_folder: str
+    file_path: str  # vault-relative, forward-slashed
+    card_type: str
+    name: str
+    importance: Any
+    summary: Any
+    frontmatter: dict
+    content: str  # raw full file text → story_cards.content
+    body: str  # post-frontmatter text → vector chunking
+    content_hash: str
+    file_mtime: float
+    always_load: bool
+
+
 class CardIndexer:
     """Indexes story card .md files into SQLite for fast entity/connection lookup."""
 
@@ -125,153 +146,74 @@ class CardIndexer:
             logger.warning("No Story Cards directory in %s", rp_folder)
             return {"entities": 0, "connections": 0, "aliases": 0, "keywords": 0}
 
-        # Clear existing data for this RP folder
         await self._clear_rp(rp_folder)
 
-        # Pass 1: Parse all files, build entity map + alias map
-        entities: dict[str, dict[str, Any]] = {}  # entity_id → {data}
+        # Pass 1: parse every file, build the entity map (deduped by entity_id,
+        # last-write-wins) and the global alias map.
+        entities_by_id: dict[str, CardData] = {}
         alias_map: dict[str, str] = {}  # alias → entity_id
-
-        md_files = list(story_cards_dir.rglob("*.md"))
-
-        # Also scan top-level Chapters directory
-        chapters_dir = self.vault_root / rp_folder / "Chapters"
-        if chapters_dir.is_dir():
-            md_files.extend(chapters_dir.rglob("*.md"))
-
-        for file_path in md_files:
-            # Read file once, parse frontmatter from the text
-            raw_content = file_path.read_text(encoding="utf-8")
-            frontmatter, body = parse_frontmatter(raw_content)
-            if frontmatter is None:
+        for file_path in self._discover_md_files(rp_folder):
+            card = self._parse_card_file(file_path, rp_folder)
+            if card is None:
                 continue
+            entities_by_id[card.entity_id] = card
+            for alias in self._extract_aliases(card.entity_id, card.frontmatter, file_path):
+                alias_map[alias] = card.entity_id
 
-            rel_path = file_path.relative_to(self.vault_root)
-            card_type = self._detect_type(frontmatter, rel_path)
-            name = self._extract_name(frontmatter, file_path)
-            if not name:
-                continue
+        cards = list(entities_by_id.values())
 
-            entity_id = f"{rp_folder}:{normalize_key(name)}"
-            content_hash = self._compute_content_hash(raw_content)
+        # Insert entities
+        for card in cards:
+            await self._persist_card_core(card)
 
-            entities[entity_id] = {
-                "id": entity_id,
-                "rp_folder": rp_folder,
-                "file_path": str(rel_path).replace("\\", "/"),
-                "card_type": card_type,
-                "name": name,
-                "importance": frontmatter.get("importance"),
-                "summary": frontmatter.get("summary"),
-                "frontmatter": frontmatter,
-                "content": raw_content,
-                "content_hash": content_hash,
-                "file_mtime": file_path.stat().st_mtime,
-                "body": body,
-                "always_load": bool(frontmatter.get("always_load")),
-            }
-
-            # Build alias map
-            aliases = self._extract_aliases(entity_id, frontmatter, file_path)
-            for alias in aliases:
-                alias_map[alias] = entity_id
-
-        # Insert entities into DB
-        import json
-
-        for _eid, data in entities.items():
-            future = await self.db.enqueue_write(
-                """INSERT OR REPLACE INTO story_cards
-                   (id, rp_folder, file_path, card_type, name, importance, summary,
-                    frontmatter, content, content_hash, file_mtime, always_load, indexed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-                [
-                    data["id"], data["rp_folder"], data["file_path"],
-                    data["card_type"], data["name"], data["importance"],
-                    data["summary"], json.dumps(data["frontmatter"], default=str),
-                    data["content"], data["content_hash"], data["file_mtime"],
-                    data["always_load"],
-                ],
-                priority=PRIORITY_REINDEX,
-            )
-            await future
-
-        # Insert aliases
-        alias_count = 0
+        # Insert aliases — the global alias_map is already deduped (one entity_id per
+        # alias, last-write-wins). Group by owning entity in one pass (not a per-card
+        # rescan), so the total stays len(alias_map), matching the prior single insert.
+        aliases_by_entity: dict[str, list[str]] = {}
         for alias, eid in alias_map.items():
-            future = await self.db.enqueue_write(
-                "INSERT OR REPLACE INTO entity_aliases (alias, entity_id) VALUES (?, ?)",
-                [alias, eid],
-                priority=PRIORITY_REINDEX,
+            aliases_by_entity.setdefault(eid, []).append(alias)
+        alias_count = 0
+        for card in cards:
+            alias_count += await self._persist_aliases(
+                card.entity_id, aliases_by_entity.get(card.entity_id, []),
             )
-            await future
-            alias_count += 1
 
         # Insert keywords
         keyword_count = 0
-        for eid, data in entities.items():
-            keywords = self._extract_keywords(eid, data["frontmatter"])
-            for kw in keywords:
-                future = await self.db.enqueue_write(
-                    "INSERT OR REPLACE INTO entity_keywords (keyword, entity_id) VALUES (?, ?)",
-                    [kw, eid],
-                    priority=PRIORITY_REINDEX,
-                )
-                await future
-                keyword_count += 1
+        for card in cards:
+            keywords = self._extract_keywords(card.entity_id, card.frontmatter)
+            keyword_count += await self._persist_keywords(card.entity_id, keywords)
 
-        # Pass 2: Extract connections using complete maps
-        # Build a simple entity key set for resolution
+        # Pass 2: connections using the complete maps
         entity_keys: dict[str, str] = {}  # normalized_key → entity_id
-        for eid in entities:
-            # entity_id is "rp_folder:normalized_key"
-            key = eid.split(":", 1)[1] if ":" in eid else eid
-            entity_keys[key] = eid
+        for card in cards:
+            key = card.entity_id.split(":", 1)[1] if ":" in card.entity_id else card.entity_id
+            entity_keys[key] = card.entity_id
 
         connection_count = 0
-        for eid, data in entities.items():
+        for card in cards:
             connections = self._extract_connections(
-                eid, data["frontmatter"], data["card_type"],
+                card.entity_id, card.frontmatter, card.card_type,
                 entity_keys, alias_map, rp_folder,
             )
-            for conn in connections:
-                if conn["to"] is None:
-                    continue
-                future = await self.db.enqueue_write(
-                    """INSERT INTO entity_connections
-                       (from_entity, to_entity, connection_type, field, role)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    [conn["from"], conn["to"], conn["type"], conn.get("field"), conn.get("role")],
-                    priority=PRIORITY_REINDEX,
-                )
-                await future
-                connection_count += 1
+            connection_count += await self._persist_connections(connections)
 
         # Seed trust_baselines from card trust data (initial_relationships, npc_trust_levels)
         trust_seeded = 0
-        for _eid, data in entities.items():
-            if data["card_type"] in ("character", "npc"):
+        for card in cards:
+            if card.card_type in ("character", "npc"):
                 trust_seeded += await self._seed_trust_baselines(
-                    data["name"], data["frontmatter"], rp_folder,
-                    entity_keys, alias_map,
+                    card.name, card.frontmatter, rp_folder, entity_keys, alias_map,
                 )
 
-        # Vector chunking — populate SQLite vectors table for search
+        # Vector chunking — populate the vectors table for search. Keep the
+        # non-empty-body guard here (full_index skips empty bodies); the helper owns
+        # only the index_document call.
         chunk_count = 0
         if self.vector_search:
-            for _eid, data in entities.items():
-                body = data.get("body", "").strip()
-                if body:
-                    try:
-                        chunks = await self.vector_search.index_document(
-                            content=body,
-                            file_path=data["file_path"],
-                            rp_folder=rp_folder,
-                            card_type=data["card_type"],
-                        )
-                        chunk_count += chunks
-                    except Exception as e:
-                        logger.warning("Vector indexing failed for %s: %s", data["name"], e)
+            for card in cards:
+                if card.body.strip():
+                    chunk_count += await self._persist_vector_chunks(card)
 
         # Invalidate alias cache in response analyzer so stale aliases are rebuilt
         if self.response_analyzer:
@@ -280,10 +222,10 @@ class CardIndexer:
         elapsed = (time.monotonic() - start) * 1000
         logger.info(
             "Full index of %s: %d entities, %d connections, %d aliases, %d keywords, %d chunks, %d trust baselines (%.0fms)",
-            rp_folder, len(entities), connection_count, alias_count, keyword_count, chunk_count, trust_seeded, elapsed,
+            rp_folder, len(cards), connection_count, alias_count, keyword_count, chunk_count, trust_seeded, elapsed,
         )
         return {
-            "entities": len(entities),
+            "entities": len(cards),
             "connections": connection_count,
             "aliases": alias_count,
             "keywords": keyword_count,
@@ -297,110 +239,52 @@ class CardIndexer:
         if not file_path.exists() or file_path.suffix != ".md":
             return False
 
-        raw_content = file_path.read_text(encoding="utf-8")
-        frontmatter, body = parse_frontmatter(raw_content)
-        if frontmatter is None:
+        card = self._parse_card_file(file_path, rp_folder)
+        if card is None:
             return False
 
-        rel_path = file_path.relative_to(self.vault_root)
-        card_type = self._detect_type(frontmatter, rel_path)
-        name = self._extract_name(frontmatter, file_path)
-        if not name:
-            return False
-
-        entity_id = f"{rp_folder}:{normalize_key(name)}"
-        content_hash = self._compute_content_hash(raw_content)
-
-        # Check if unchanged
+        # Skip if unchanged
         existing = await self.db.fetch_one(
-            "SELECT content_hash FROM story_cards WHERE id = ?", [entity_id]
+            "SELECT content_hash FROM story_cards WHERE id = ?", [card.entity_id]
         )
-        if existing and existing["content_hash"] == content_hash:
+        if existing and existing["content_hash"] == card.content_hash:
             return False  # No changes
 
-        # Remove old data for this entity
-        await self._remove_entity(entity_id)
+        # Replace old data for this entity
+        await self._remove_entity(card.entity_id)
+        await self._persist_card_core(card)
 
-        import json
+        aliases = self._extract_aliases(card.entity_id, card.frontmatter, file_path)
+        await self._persist_aliases(card.entity_id, aliases)
 
-        # Insert entity
-        future = await self.db.enqueue_write(
-            """INSERT OR REPLACE INTO story_cards
-               (id, rp_folder, file_path, card_type, name, importance, summary,
-                frontmatter, content, content_hash, file_mtime, always_load, indexed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-            [
-                entity_id, rp_folder, str(rel_path).replace("\\", "/"),
-                card_type, name, frontmatter.get("importance"),
-                frontmatter.get("summary"), json.dumps(frontmatter),
-                raw_content, content_hash, file_path.stat().st_mtime,
-                bool(frontmatter.get("always_load")),
-            ],
-            priority=PRIORITY_REINDEX,
-        )
-        await future
-
-        # Aliases
-        aliases = self._extract_aliases(entity_id, frontmatter, file_path)
-        for alias in aliases:
-            future = await self.db.enqueue_write(
-                "INSERT OR REPLACE INTO entity_aliases (alias, entity_id) VALUES (?, ?)",
-                [alias, entity_id],
-                priority=PRIORITY_REINDEX,
-            )
-            await future
-
-        # Keywords
-        keywords = self._extract_keywords(entity_id, frontmatter)
-        for kw in keywords:
-            future = await self.db.enqueue_write(
-                "INSERT OR REPLACE INTO entity_keywords (keyword, entity_id) VALUES (?, ?)",
-                [kw, entity_id],
-                priority=PRIORITY_REINDEX,
-            )
-            await future
+        keywords = self._extract_keywords(card.entity_id, card.frontmatter)
+        await self._persist_keywords(card.entity_id, keywords)
 
         # Connections — load existing entities/aliases from DB for resolution
         entity_keys, alias_map_db = await self._load_resolution_maps(rp_folder)
         connections = self._extract_connections(
-            entity_id, frontmatter, card_type,
+            card.entity_id, card.frontmatter, card.card_type,
             entity_keys, alias_map_db, rp_folder,
         )
-        for conn in connections:
-            if conn["to"] is None:
-                continue
-            future = await self.db.enqueue_write(
-                """INSERT INTO entity_connections
-                   (from_entity, to_entity, connection_type, field, role)
-                   VALUES (?, ?, ?, ?, ?)""",
-                [conn["from"], conn["to"], conn["type"], conn.get("field"), conn.get("role")],
-                priority=PRIORITY_REINDEX,
-            )
-            await future
+        await self._persist_connections(connections)
 
         # Seed trust_baselines from card trust data
-        if card_type in ("character", "npc"):
+        if card.card_type in ("character", "npc"):
             await self._seed_trust_baselines(
-                name, frontmatter, rp_folder, entity_keys, alias_map_db,
+                card.name, card.frontmatter, rp_folder, entity_keys, alias_map_db,
             )
 
-        # Vector chunking for this file (body only, no frontmatter)
+        # Vector chunking for this file (body only, no frontmatter). Called
+        # unconditionally so an emptied body still triggers index_document's
+        # per-file_path cleanup of stale chunks.
         if self.vector_search:
-            try:
-                await self.vector_search.index_document(
-                    content=body,
-                    file_path=str(rel_path).replace("\\", "/"),
-                    rp_folder=rp_folder,
-                    card_type=card_type,
-                )
-            except Exception as e:
-                logger.warning("Vector indexing failed for %s: %s", rel_path, e)
+            await self._persist_vector_chunks(card)
 
         # Invalidate alias cache for this RP folder
         if self.response_analyzer:
             self.response_analyzer.invalidate_alias_cache(rp_folder)
 
-        logger.info("Indexed file: %s → %s", rel_path, entity_id)
+        logger.info("Indexed file: %s → %s", card.file_path, card.entity_id)
         return True
 
     async def remove_file(self, rp_folder: str, file_path: Path) -> bool:
@@ -425,6 +309,128 @@ class CardIndexer:
             if child.is_dir() and (child / "Story Cards").is_dir():
                 folders.append(child.name)
         return sorted(folders)
+
+    # ------------------------------------------------------------------
+    # Internal: parse + persist helpers (shared by full_index / index_file)
+    # ------------------------------------------------------------------
+
+    def _discover_md_files(self, rp_folder: str) -> list[Path]:
+        """All .md files under an RP's Story Cards/ plus its top-level Chapters/."""
+        md_files = list((self.vault_root / rp_folder / "Story Cards").rglob("*.md"))
+        chapters_dir = self.vault_root / rp_folder / "Chapters"
+        if chapters_dir.is_dir():
+            md_files.extend(chapters_dir.rglob("*.md"))
+        return md_files
+
+    def _parse_card_file(self, file_path: Path, rp_folder: str) -> CardData | None:
+        """Read + parse one .md file into a CardData. None if no frontmatter/name."""
+        raw_content = file_path.read_text(encoding="utf-8")
+        frontmatter, body = parse_frontmatter(raw_content)
+        if frontmatter is None:
+            return None
+
+        rel_path = file_path.relative_to(self.vault_root)
+        name = self._extract_name(frontmatter, file_path)
+        if not name:
+            return None
+
+        return CardData(
+            entity_id=f"{rp_folder}:{normalize_key(name)}",
+            rp_folder=rp_folder,
+            file_path=str(rel_path).replace("\\", "/"),
+            card_type=self._detect_type(frontmatter, rel_path),
+            name=name,
+            importance=frontmatter.get("importance"),
+            summary=frontmatter.get("summary"),
+            frontmatter=frontmatter,
+            content=raw_content,
+            body=body,
+            content_hash=self._compute_content_hash(raw_content),
+            file_mtime=file_path.stat().st_mtime,
+            always_load=bool(frontmatter.get("always_load")),
+        )
+
+    async def _persist_card_core(self, card: CardData) -> None:
+        """Write the 13-column story_cards row for a card."""
+        future = await self.db.enqueue_write(
+            """INSERT OR REPLACE INTO story_cards
+               (id, rp_folder, file_path, card_type, name, importance, summary,
+                frontmatter, content, content_hash, file_mtime, always_load, indexed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            [
+                card.entity_id, card.rp_folder, card.file_path,
+                card.card_type, card.name, card.importance,
+                card.summary, json.dumps(card.frontmatter, default=str),
+                card.content, card.content_hash, card.file_mtime,
+                card.always_load,
+            ],
+            priority=PRIORITY_REINDEX,
+        )
+        await future
+
+    async def _persist_aliases(self, entity_id: str, aliases: list[str]) -> int:
+        """Insert alias rows; return the count written."""
+        count = 0
+        for alias in aliases:
+            future = await self.db.enqueue_write(
+                "INSERT OR REPLACE INTO entity_aliases (alias, entity_id) VALUES (?, ?)",
+                [alias, entity_id],
+                priority=PRIORITY_REINDEX,
+            )
+            await future
+            count += 1
+        return count
+
+    async def _persist_keywords(self, entity_id: str, keywords: list[str]) -> int:
+        """Insert keyword rows; return the count written."""
+        count = 0
+        for kw in keywords:
+            future = await self.db.enqueue_write(
+                "INSERT OR REPLACE INTO entity_keywords (keyword, entity_id) VALUES (?, ?)",
+                [kw, entity_id],
+                priority=PRIORITY_REINDEX,
+            )
+            await future
+            count += 1
+        return count
+
+    async def _persist_connections(self, connections: list[dict]) -> int:
+        """Insert connection rows (skipping unresolved targets); return the count."""
+        count = 0
+        for conn in connections:
+            if conn["to"] is None:
+                continue
+            future = await self.db.enqueue_write(
+                """INSERT INTO entity_connections
+                   (from_entity, to_entity, connection_type, field, role)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [conn["from"], conn["to"], conn["type"], conn.get("field"), conn.get("role")],
+                priority=PRIORITY_REINDEX,
+            )
+            await future
+            count += 1
+        return count
+
+    async def _persist_vector_chunks(self, card: CardData) -> int:
+        """Index the card body into the vectors table; return the chunk count.
+
+        Owns only the index_document call + its try/except. Callers decide whether
+        to guard on a non-empty body (full_index does; index_file calls it
+        unconditionally so an emptied body still cleans up its stale chunks via
+        index_document's per-file_path remove).
+        """
+        if not self.vector_search:
+            return 0
+        try:
+            return await self.vector_search.index_document(
+                content=card.body,
+                file_path=card.file_path,
+                rp_folder=card.rp_folder,
+                card_type=card.card_type,
+            )
+        except Exception as e:
+            logger.warning("Vector indexing failed for %s: %s", card.file_path, e)
+            return 0
 
     # ------------------------------------------------------------------
     # Internal: Entity extraction
@@ -637,8 +643,6 @@ class CardIndexer:
 
         Returns count of baselines seeded/updated.
         """
-        from datetime import datetime
-
         now = datetime.now(UTC).isoformat()
         count = 0
 
@@ -934,7 +938,7 @@ class CardIndexer:
         entity_keys: dict[str, str],
         alias_map: dict[str, str],
         rp_folder: str,
-    ) -> str:
+    ) -> str | None:
         """Resolve a reference string to an entity ID.
 
         Tries 4 strategies. Falls back to ``rp_folder:normalize_key(ref)``.
@@ -1011,6 +1015,15 @@ class CardIndexer:
             priority=PRIORITY_REINDEX,
         )
         await future
+
+    async def remove_entity_by_id(self, entity_id: str) -> None:
+        """Public entry point to remove a single indexed entity by its ID.
+
+        Wraps the private ``_remove_entity`` so callers (e.g. the cards delete
+        endpoint cleaning up a DB row whose .md file is already gone) don't reach
+        into a private member.
+        """
+        await self._remove_entity(entity_id)
 
     async def _remove_entity(self, entity_id: str) -> None:
         """Remove a single entity and its connections/aliases/keywords."""

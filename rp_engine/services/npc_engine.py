@@ -11,7 +11,9 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rp_engine.config import RPEngineConfig, get_config
 from rp_engine.database import Database
@@ -28,6 +30,9 @@ from rp_engine.services.state_entry_resolver import latest_character_states_batc
 from rp_engine.services.vector_search import VectorSearch
 from rp_engine.utils.json_helpers import safe_parse_json, safe_parse_json_list
 from rp_engine.utils.trust import fetch_trust_map, fetch_trust_pair, trust_stage
+
+if TYPE_CHECKING:
+    from rp_engine.services.branch_manager import BranchManager
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,21 @@ _STOP_WORDS = frozenset({
 })
 
 
+@dataclass(slots=True)
+class TrustRelationship:
+    """The NPC↔PC trust relationship loaded for a single reaction."""
+
+    score: int
+    stage: str
+    dynamic: str | None
+    history: list[dict]
+
+
+async def _identity(value):
+    """Awaitable pass-through so a pre-loaded value can join an asyncio.gather."""
+    return value
+
+
 class NPCEngine:
     """NPC reaction pipeline: context building, LLM call, response parsing."""
 
@@ -86,6 +106,7 @@ class NPCEngine:
         scene_classifier=None,
         resolver=None,
         lance_store=None,
+        branch_manager: BranchManager | None = None,
     ) -> None:
         self.db = db
         self.llm_client = llm_client
@@ -97,6 +118,7 @@ class NPCEngine:
         self._scene_classifier = scene_classifier
         self.resolver = resolver
         self.lance_store = lance_store
+        self.branch_manager = branch_manager  # late-bound by container (see container.py)
         self.diagnostic_logger = None  # injected by container
 
         # Framework caches (loaded on init)
@@ -170,47 +192,37 @@ class NPCEngine:
         modifiers_raw = card_fm.get("behavioral_modifiers", [])
         modifiers = safe_parse_json_list(modifiers_raw)
 
-        # 3. Load trust data from trust_baselines + trust_modifications
-        trust_score = 0
-        trust_stage_name = "neutral"
-        trust_history: list[dict] = []
-
-        # Load relationship dynamic (role) from entity_connections
-        dynamic_row = await self.db.fetch_one(
-            """SELECT role FROM entity_connections
-               WHERE connection_type = 'has_relationship'
-                 AND ((LOWER(from_entity) = LOWER(?) AND LOWER(to_entity) = LOWER(?))
-                   OR (LOWER(from_entity) = LOWER(?) AND LOWER(to_entity) = LOWER(?)))
-                 AND role IS NOT NULL
-               LIMIT 1""",
-            [card_name, pov_character, pov_character, card_name],
-        )
-        dynamic = dynamic_row["role"] if dynamic_row else None
-
-        baseline, mod_sum = await fetch_trust_pair(
-            self.db, rp_folder, branch, npc_name, pov_character
-        )
-        trust_score = baseline + mod_sum
-        trust_stage_name = trust_stage(trust_score)
-
-        # Load recent trust history
-        history_rows = await self.db.fetch_all(
-            """SELECT date, change, direction, reason FROM trust_modifications
-               WHERE rp_folder = ? AND branch = ?
-                 AND ((LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?))
-                   OR (LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)))
-               ORDER BY created_at DESC LIMIT 5""",
-            [rp_folder, branch, npc_name, pov_character, pov_character, npc_name],
-        )
-        trust_history = [dict(r) for r in history_rows]
-
-        # 4. Detect intimate context
+        # 3. Detect intimate context (cheap, sync — gates downstream trimming)
         intimate = self._detect_intimate(scene_prompt)
 
-        # 4b. Search past interactions with this NPC
-        npc_history = await self._search_npc_history(
-            card_name, scene_prompt, rp_folder, branch
+        # 4. Load the independent data concurrently. Plain gather (no
+        #    return_exceptions): a failed load propagates, exactly as the prior
+        #    sequential code did. Pre-loaded recent_exchanges / scene_enrichment
+        #    (supplied by the batch path) skip their query via _identity.
+        exchanges_coro = (
+            self._load_recent_exchanges(rp_folder, branch)
+            if recent_exchanges is None
+            else _identity(recent_exchanges)
         )
+        enrichment_coro = (
+            self._get_scene_enrichment(scene_prompt, rp_folder)
+            if scene_enrichment is None
+            else _identity(scene_enrichment)
+        )
+        (
+            trust,
+            npc_history,
+            secrets_text,
+            exchanges,
+            scene_enrichment,
+        ) = await asyncio.gather(
+            self._load_trust_relationship(card_name, pov_character, rp_folder, branch),
+            self._search_npc_history(card_name, scene_prompt, rp_folder, branch),
+            self._load_npc_secrets(npc_name, rp_folder),
+            exchanges_coro,
+            enrichment_coro,
+        )
+        exchanges_text = self._format_exchanges(exchanges)
 
         # 5. Build character context (user message for LLM)
         character_context = self._build_character_context(
@@ -218,10 +230,10 @@ class NPCEngine:
             card_content=card_content,
             archetype=archetype,
             modifiers=modifiers,
-            trust_score=trust_score,
-            trust_stage_name=trust_stage_name,
-            dynamic=dynamic,
-            trust_history=trust_history,
+            trust_score=trust.score,
+            trust_stage_name=trust.stage,
+            dynamic=trust.dynamic,
+            trust_history=trust.history,
             pov_character=pov_character,
             intimate=intimate,
             recent_exchanges=recent_exchanges,
@@ -231,57 +243,30 @@ class NPCEngine:
             scene_prompt=scene_prompt,
         )
 
-        # 5b. NPC Behavioral Intelligence injection
-        behavioral_constraints = ""
-        if self.npc_intelligence:
-            try:
-                signals = {}
-                if self._scene_classifier:
-                    signals = await self._scene_classifier.classify(
-                        scene_prompt, None, rp_folder, branch)
-                payload = self.npc_intelligence.prepare(
-                    npc_name=card_name,
-                    archetype=archetype or "common_people",
-                    modifiers=modifiers,
-                    trust_stage=trust_stage_name,
-                    trust_score=trust_score,
-                    scene_signals=signals,
-                    scene_prompt=scene_prompt,
-                )
-                if payload.patterns_included:
-                    behavioral_constraints = payload.text
-            except Exception:
-                logger.warning("NPC intelligence failed for %s", card_name, exc_info=True)
+        # 6. NPC Behavioral Intelligence injection (needs trust stage/score)
+        behavioral_constraints = await self._load_behavioral_constraints(
+            npc_name=card_name,
+            archetype=archetype,
+            modifiers=modifiers,
+            trust_stage_name=trust.stage,
+            trust_score=trust.score,
+            scene_prompt=scene_prompt,
+            rp_folder=rp_folder,
+            branch=branch,
+        )
 
-        # 6. Load secrets this NPC knows
-        secrets_text = await self._load_npc_secrets(npc_name, rp_folder)
+        # 7. Assemble final prompt
+        full_context = self._assemble_full_context(
+            character_context=character_context,
+            exchanges_text=exchanges_text,
+            secrets_text=secrets_text,
+            scene_enrichment=scene_enrichment,
+            npc_history=npc_history,
+            scene_prompt=scene_prompt,
+            pov_character=pov_character,
+        )
 
-        # 7. Load recent exchanges if not pre-loaded (batch provides them)
-        exchanges_text = ""
-        if recent_exchanges is not None:
-            exchanges_text = self._format_exchanges(recent_exchanges)
-        else:
-            exchanges = await self._load_recent_exchanges(rp_folder, branch)
-            exchanges_text = self._format_exchanges(exchanges)
-
-        # 8. Get scene enrichment if not pre-loaded
-        if scene_enrichment is None:
-            scene_enrichment = await self._get_scene_enrichment(scene_prompt, rp_folder)
-
-        # Build final prompt
-        full_context = character_context
-        if exchanges_text:
-            full_context += f"\n## Recent Conversation\nThese are the most recent exchanges. Use this for continuity.\n\n{exchanges_text}\n"
-        if secrets_text:
-            full_context += f"\n## CANON FACTS — Secrets You Know\nThese are ESTABLISHED FACTS. Use exact details. Do NOT invent alternatives.\n\n{secrets_text}\n"
-        if scene_enrichment:
-            full_context += f"\n## Scene-Relevant Context\n{scene_enrichment}\n"
-        if npc_history:
-            full_context += f"\n## Past Interactions with {pov_character}\nUse these past interactions to ground your response. Reference specific past events naturally — don't enumerate them, weave them into your reaction.\n\n{npc_history}\n"
-
-        full_context += f"\n---\n## What Just Happened\n{scene_prompt}\n"
-
-        # 9. Call LLM
+        # 8. Call LLM
         effective_system = self._system_prompt
         if behavioral_constraints:
             effective_system = f"{self._system_prompt}\n\n{behavioral_constraints}"
@@ -298,24 +283,11 @@ class NPCEngine:
             response_format={"type": "json_object"},
         )
 
-        # 10. Parse response
+        # 10. Parse response + emit diagnostic record
         reaction = self._parse_reaction(response.content, card_name)
-
-        if self.diagnostic_logger:
-            self.diagnostic_logger.log(
-                category="npc",
-                event="npc_reaction",
-                data={
-                    "npc_name": npc_name,
-                    "rp_folder": rp_folder,
-                    "branch": branch,
-                    "trust_delta": reaction.trust_delta if reaction else 0,
-                    "emotional_state": reaction.emotional_state if reaction else None,
-                    "model": model,
-                },
-                content={"scene_prompt": scene_prompt[:500]},
-            )
-
+        self._log_npc_reaction(
+            reaction, npc_name, rp_folder, branch, scene_prompt, model
+        )
         return reaction
 
     async def get_batch_reactions(
@@ -350,6 +322,125 @@ class NPCEngine:
                 reactions.append(result)
 
         return reactions
+
+    # ------------------------------------------------------------------
+    # Reaction data-loading helpers
+    # ------------------------------------------------------------------
+
+    async def _load_trust_relationship(
+        self,
+        npc_name: str,
+        pov_character: str,
+        rp_folder: str,
+        branch: str,
+    ) -> TrustRelationship:
+        """Load the NPC↔PC trust relationship: role dynamic, score, recent history.
+
+        The trust reads OR-merge both directions (the Phase 2 directional-read fix
+        has not landed yet). Kept verbatim from the inline version so the baseline
+        stays honest — direction is corrected in Phase 2, not here.
+        """
+        # Relationship dynamic (role) from entity_connections
+        dynamic_row = await self.db.fetch_one(
+            """SELECT role FROM entity_connections
+               WHERE connection_type = 'has_relationship'
+                 AND ((LOWER(from_entity) = LOWER(?) AND LOWER(to_entity) = LOWER(?))
+                   OR (LOWER(from_entity) = LOWER(?) AND LOWER(to_entity) = LOWER(?)))
+                 AND role IS NOT NULL
+               LIMIT 1""",
+            [npc_name, pov_character, pov_character, npc_name],
+        )
+        dynamic = dynamic_row["role"] if dynamic_row else None
+
+        baseline, mod_sum = await fetch_trust_pair(
+            self.db, rp_folder, branch, npc_name, pov_character
+        )
+        score = baseline + mod_sum
+
+        # Directional history npc → pov, matching the directional `score` above.
+        # OR-merging the reverse would list the POV character's trust-change reasons
+        # alongside the NPC's, flattening the asymmetry the score now respects.
+        history_rows = await self.db.fetch_all(
+            """SELECT date, change, direction, reason FROM trust_modifications
+               WHERE rp_folder = ? AND branch = ?
+                 AND LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)
+               ORDER BY created_at DESC LIMIT 5""",
+            [rp_folder, branch, npc_name, pov_character],
+        )
+        return TrustRelationship(
+            score=score,
+            stage=trust_stage(score),
+            dynamic=dynamic,
+            history=[dict(r) for r in history_rows],
+        )
+
+    async def _load_behavioral_constraints(
+        self,
+        npc_name: str,
+        archetype: str | None,
+        modifiers: list[str],
+        trust_stage_name: str,
+        trust_score: int,
+        scene_prompt: str,
+        rp_folder: str,
+        branch: str,
+    ) -> str:
+        """NPC Behavioral Intelligence injection. Returns "" when unavailable or on error."""
+        if not self.npc_intelligence:
+            return ""
+        try:
+            signals = {}
+            if self._scene_classifier:
+                signals = await self._scene_classifier.classify(
+                    scene_prompt, None, rp_folder, branch
+                )
+            payload = self.npc_intelligence.prepare(
+                npc_name=npc_name,
+                archetype=archetype or "common_people",
+                modifiers=modifiers,
+                trust_stage=trust_stage_name,
+                trust_score=trust_score,
+                scene_signals=signals,
+                scene_prompt=scene_prompt,
+            )
+            if payload.patterns_included:
+                return payload.text
+        except Exception:
+            logger.warning("NPC intelligence failed for %s", npc_name, exc_info=True)
+        return ""
+
+    def _log_npc_reaction(
+        self,
+        reaction: NPCReaction,
+        npc_name: str,
+        rp_folder: str,
+        branch: str,
+        scene_prompt: str,
+        model: str,
+    ) -> None:
+        """Emit the structured diagnostic record for a parsed reaction.
+
+        Reads the real NPCReaction fields (``trustShift`` / ``emotionalUndercurrent``).
+        The previous inline version referenced ``reaction.trust_delta`` /
+        ``reaction.emotional_state`` — attributes that do not exist — so every parsed
+        reaction raised AttributeError under the always-injected DiagnosticLogger
+        (propagating in the single path, silently dropped to [] in the batch path).
+        """
+        if not self.diagnostic_logger:
+            return
+        self.diagnostic_logger.log(
+            category="npc",
+            event="npc_reaction",
+            data={
+                "npc_name": npc_name,
+                "rp_folder": rp_folder,
+                "branch": branch,
+                "trust_delta": reaction.trustShift.amount,
+                "emotional_state": reaction.emotionalUndercurrent,
+                "model": model,
+            },
+            content={"scene_prompt": scene_prompt[:500]},
+        )
 
     # ------------------------------------------------------------------
     # Trust + listing
@@ -425,19 +516,19 @@ class NPCEngine:
             self.db, rp_folder, branch, card_ids
         ) if card_ids else {}
 
-        # Batch-fetch trust baselines and modification sums
+        # Batch-fetch trust baselines and modification sums.
+        # DIRECTIONAL: each NPC's listed score is npc → pov ("how much the NPC trusts
+        # the POV character"), matching _load_trust_relationship / get_trust. Only the
+        # (npc, pov) rows count — never OR/sum the reverse (pov, npc) direction, which
+        # would flatten the asymmetry.
         pov_lower = pov_character.lower()
         trust_pairs = await fetch_trust_map(self.db, rp_folder, branch)
-        # Flatten into per-NPC maps relative to POV character
         baseline_map: dict[str, int] = {}
         mod_map: dict[str, int] = {}
         for (ca, cb), (baseline, mod_sum) in trust_pairs.items():
-            if ca == pov_lower:
-                baseline_map[cb] = baseline_map.get(cb, 0) + baseline
-                mod_map[cb] = mod_map.get(cb, 0) + mod_sum
-            elif cb == pov_lower:
-                baseline_map[ca] = baseline_map.get(ca, 0) + baseline
-                mod_map[ca] = mod_map.get(ca, 0) + mod_sum
+            if cb == pov_lower:  # ca → pov : the NPC's trust toward the POV character
+                baseline_map[ca] = baseline
+                mod_map[ca] = mod_sum
 
         results: list[NPCListItem] = []
         for card in card_rows:
@@ -553,6 +644,30 @@ class NPCEngine:
 
         return prompt
 
+    @staticmethod
+    def _assemble_full_context(
+        character_context: str,
+        exchanges_text: str,
+        secrets_text: str,
+        scene_enrichment: str | None,
+        npc_history: str,
+        scene_prompt: str,
+        pov_character: str,
+    ) -> str:
+        """Concatenate the character context with the optional grounding sections."""
+        full_context = character_context
+        if exchanges_text:
+            full_context += f"\n## Recent Conversation\nThese are the most recent exchanges. Use this for continuity.\n\n{exchanges_text}\n"
+        if secrets_text:
+            full_context += f"\n## CANON FACTS — Secrets You Know\nThese are ESTABLISHED FACTS. Use exact details. Do NOT invent alternatives.\n\n{secrets_text}\n"
+        if scene_enrichment:
+            full_context += f"\n## Scene-Relevant Context\n{scene_enrichment}\n"
+        if npc_history:
+            full_context += f"\n## Past Interactions with {pov_character}\nUse these past interactions to ground your response. Reference specific past events naturally — don't enumerate them, weave them into your reaction.\n\n{npc_history}\n"
+
+        full_context += f"\n---\n## What Just Happened\n{scene_prompt}\n"
+        return full_context
+
     def _extract_trust_stage_section(self, stage_name: str, modifiers: list[str]) -> str:
         """Extract only the relevant trust stage + quick reference from the full trust doc."""
         if not self._trust_framework:
@@ -648,6 +763,14 @@ class NPCEngine:
         limit = self.config.npc.history_search_limit
         min_score = self.config.npc.history_min_score
 
+        # Branch-aware vector search: on a fresh branch the parent's hits would be
+        # missed without the ancestry chain (mirrors ContextEngine._search_past_exchanges).
+        ancestry_chain = None
+        if self.branch_manager:
+            ancestry_chain = await self.branch_manager.get_ancestry_chain(
+                rp_folder, branch
+            )
+
         try:
             query = f"{npc_name} {scene_context[:200]}"
             results = await self.lance_store.search_exchanges(
@@ -655,6 +778,7 @@ class NPCEngine:
                 rp_folder=rp_folder,
                 branch=branch,
                 limit=limit * 2,
+                ancestry_chain=ancestry_chain,
             )
         except Exception as e:
             logger.warning("NPC history search failed for %s: %s", npc_name, e)
@@ -684,7 +808,25 @@ class NPCEngine:
         limit: int = 3,
         max_chars: int = 1500,
     ) -> list[dict]:
-        """Load recent exchanges from DB."""
+        """Load recent exchanges, walking branch ancestry when available.
+
+        On a fresh child branch (no own exchanges yet) a strict branch-scoped query
+        returns [], so the NPC would see no recent conversation. When a
+        ``branch_manager`` is wired in, fall back to an ancestry-aware read so the
+        parent branch's exchanges stay visible (per the branch-ancestry design;
+        mirrors ``ContextEngine._get_last_response``).
+        """
+        if self.branch_manager:
+            rows = await self.branch_manager.get_exchanges_with_ancestry(
+                rp_folder, branch, limit=limit
+            )
+            rows = [
+                {k: r[k] for k in ("user_message", "assistant_response") if k in r}
+                for r in rows
+            ]
+            # Reverse so oldest is first
+            return list(reversed(rows))
+
         rows = await self.db.fetch_all(
             """SELECT user_message, assistant_response FROM exchanges
                WHERE rp_folder = ? AND branch = ?

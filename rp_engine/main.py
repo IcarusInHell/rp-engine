@@ -149,6 +149,8 @@ app.add_middleware(RequestLoggingMiddleware)
 from rp_engine.routers import (  # noqa: E402
     agent_chat,
     analyze,
+    annotations,
+    bookmarks,
     branches,
     cards,
     chat,
@@ -173,8 +175,10 @@ from rp_engine.routers import (  # noqa: E402
 app.include_router(cards.router)
 app.include_router(sessions.router)
 app.include_router(exchanges.router)
-app.include_router(exchanges.bookmarks_router)
-app.include_router(exchanges.annotations_router)
+app.include_router(bookmarks.router)
+app.include_router(bookmarks.list_router)
+app.include_router(annotations.router)
+app.include_router(annotations.top_router)
 app.include_router(rp.router)
 app.include_router(context.router)
 app.include_router(triggers.router)

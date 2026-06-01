@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 class StoryCardSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: str  # DB primary key ("rp_folder:normalized_name"); used by chat attach
     name: str
     card_type: str
     importance: str | None = None
@@ -62,6 +63,7 @@ class ReindexResponse(BaseModel):
     aliases: int
     keywords: int
     chunks: int = 0
+    trust_baselines_seeded: int = 0  # Bug E: surfaced in both single- and multi-folder paths
     duration_ms: float
 
 
@@ -85,6 +87,7 @@ class AuditCardsRequest(BaseModel):
     rp_folder: str
     mode: str = "quick"
     session_id: str | None = None
+    branch: str = "main"  # Bug B: scope the no-session "50 most recent" scan to one branch
 
 
 class AuditGap(BaseModel):

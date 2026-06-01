@@ -1,4 +1,5 @@
 export interface StoryCardSummary {
+  id: string;
   name: string;
   card_type: string;
   importance: string | null;

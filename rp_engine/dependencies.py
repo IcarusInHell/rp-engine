@@ -18,12 +18,14 @@ from rp_engine.services.analysis_pipeline import AnalysisPipeline
 from rp_engine.services.ancestry_resolver import AncestryResolver
 from rp_engine.services.auto_save import AutoSaveManager
 from rp_engine.services.branch_manager import BranchManager
+from rp_engine.services.card_authoring import CardAuthoringService
 from rp_engine.services.card_indexer import CardIndexer
 from rp_engine.services.chat_manager import ChatManager
 from rp_engine.services.context_engine import ContextEngine
 from rp_engine.services.custom_state_manager import CustomStateManager
 from rp_engine.services.diagnostic_logger import DiagnosticLogger
 from rp_engine.services.entity_extractor import EntityExtractor
+from rp_engine.services.exchange_search_service import ExchangeSearchService
 from rp_engine.services.exchange_writer import ExchangeWriter
 from rp_engine.services.graph_resolver import GraphResolver
 from rp_engine.services.guidelines_service import GuidelinesService
@@ -33,6 +35,7 @@ from rp_engine.services.npc_engine import NPCEngine
 from rp_engine.services.prompt_assembler import PromptAssembler
 from rp_engine.services.recap_builder import RecapBuilder
 from rp_engine.services.response_analyzer import ResponseAnalyzer
+from rp_engine.services.rewind_service import RewindService
 from rp_engine.services.scene_classifier import SceneClassifier
 from rp_engine.services.state_manager import StateManager
 from rp_engine.services.summary_builder import SummaryBuilder
@@ -62,6 +65,10 @@ def get_db(request: Request) -> Database:
 
 def get_card_indexer(request: Request) -> CardIndexer:
     return _get(request, "card_indexer")
+
+
+def get_card_authoring_service(request: Request) -> CardAuthoringService:
+    return _get(request, "card_authoring_service")
 
 
 def get_vault_root(request: Request) -> Path:
@@ -129,6 +136,14 @@ def get_analysis_pipeline(request: Request) -> AnalysisPipeline | None:
 
 def get_exchange_writer(request: Request) -> ExchangeWriter:
     return _get(request, "exchange_writer")
+
+
+def get_rewind_service(request: Request) -> RewindService:
+    return _get(request, "rewind_service")
+
+
+def get_exchange_search_service(request: Request) -> ExchangeSearchService:
+    return _get(request, "exchange_search_service")
 
 
 def get_branch_manager(request: Request) -> BranchManager:

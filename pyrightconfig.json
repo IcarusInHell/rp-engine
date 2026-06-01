@@ -1,0 +1,32 @@
+{
+  "pythonVersion": "3.14",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "basic",
+  "include": [
+    "rp_engine",
+    "npc_intelligence",
+    "writing_intelligence",
+    "pattern_intelligence"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "frontend",
+    "tests",
+    ".venv",
+    "build",
+    "dist"
+  ],
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportMissingTypeStubs": false,
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportDuplicateImport": "error",
+  "reportUntypedBaseClass": false,
+  "reportArgumentType": "warning",
+  "reportOptionalMemberAccess": "warning",
+  "reportAttributeAccessIssue": "warning",
+  "reportOptionalIterable": "warning",
+  "reportOptionalCall": "warning"
+}

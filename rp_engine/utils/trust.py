@@ -48,20 +48,24 @@ def trust_stage(score: int) -> str:
 async def fetch_trust_pair(
     db: Database, rp_folder: str, branch: str, char_a: str, char_b: str
 ) -> tuple[int, int]:
-    """Return (baseline, modification_sum) for a character pair."""
+    """Return (baseline, modification_sum) for the directional pair char_a → char_b.
+
+    Trust is asymmetric: ``(character_a, character_b)`` means "char_a's trust toward
+    char_b". Reads the char_a→char_b row ONLY — never OR-merges the reverse direction
+    (doing so flattens Alice's-trust-of-Bob into Bob's-trust-of-Alice). Callers that
+    want the reverse direction must pass the args swapped.
+    """
     baseline = await db.fetch_val(
         """SELECT baseline_score FROM trust_baselines
            WHERE rp_folder = ? AND branch = ?
-             AND ((LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?))
-               OR (LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)))""",
-        [rp_folder, branch, char_a, char_b, char_b, char_a],
+             AND LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)""",
+        [rp_folder, branch, char_a, char_b],
     )
     mod_sum = await db.fetch_val(
         """SELECT COALESCE(SUM(change), 0) FROM trust_modifications
            WHERE rp_folder = ? AND branch = ?
-             AND ((LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?))
-               OR (LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)))""",
-        [rp_folder, branch, char_a, char_b, char_b, char_a],
+             AND LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)""",
+        [rp_folder, branch, char_a, char_b],
     )
     return (baseline or 0, mod_sum or 0)
 
@@ -147,13 +151,17 @@ async def resolve_trust_for_pair(
         baseline = 0
         source = "default"
 
-    # Sum modifications (either direction)
+    # Sum modifications for the directional pair char_a → char_b ONLY.
+    # OR-merging the reverse here flattens directions: a one-sided modification on
+    # char_b → char_a would leak into char_a → char_b's live score (the Phase-0c
+    # discriminator that exposed this bug). Baselines stay forward-first with a
+    # reverse fallback above (one-sided cards), which is a deliberate fallback, not
+    # a merge — but modifications are always read in the requested direction.
     mod_sum = await db.fetch_val(
         """SELECT COALESCE(SUM(change), 0) FROM trust_modifications
            WHERE rp_folder = ? AND branch = ?
-             AND ((LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?))
-               OR (LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)))""",
-        [rp_folder, branch, char_a, char_b, char_b, char_a],
+             AND LOWER(character_a) = LOWER(?) AND LOWER(character_b) = LOWER(?)""",
+        [rp_folder, branch, char_a, char_b],
     )
     mod_sum = mod_sum or 0
 

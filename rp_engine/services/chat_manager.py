@@ -20,7 +20,12 @@ from rp_engine.models.chat import (
     SceneOverride,
     SwipeResponse,
 )
-from rp_engine.models.context import ContextRequest
+from rp_engine.models.context import (
+    ContextDocument,
+    ContextRequest,
+    ContextResponse,
+    SceneState,
+)
 from rp_engine.services.context_engine import ContextEngine
 from rp_engine.services.exchange_writer import ExchangeWriter
 from rp_engine.services.llm_client import LLMClient
@@ -149,6 +154,7 @@ class ChatManager:
                 exchange_number=0,
                 session_id=session_id,
                 context_summary=None,
+                ooc=True,
             )
 
         exchange_id, exchange_number = await self._save_exchange(
@@ -500,7 +506,9 @@ class ChatManager:
         """
         tail = existing_response[-1500:] if len(existing_response) > 1500 else existing_response
         ellipsis = "..." if len(existing_response) > 1500 else ""
-        messages.append({
+        # Build a fresh list rather than mutating the caller's `messages` in place —
+        # the signature returns a list and must not have an append side effect.
+        return [*messages, {
             "role": "user",
             "content": (
                 "[Continue the narrative from exactly where it left off. "
@@ -508,8 +516,7 @@ class ChatManager:
                 "or mid-paragraph if needed. Write only the new continuation.]\n\n"
                 f"The story so far ends with:\n\n{ellipsis}{tail}"
             ),
-        })
-        return messages
+        }]
 
     async def _build_pipeline_messages(
         self,
@@ -534,15 +541,38 @@ class ChatManager:
             session_id=session_id,
         )
 
-        # Inject attached cards as extra context documents
+        await self._apply_context_overrides(
+            context_response, attach_card_ids, scene_override, rp_folder,
+        )
+
+        return await self.prompt_assembler.build_messages(
+            rp_folder=rp_folder,
+            branch=branch,
+            user_message=user_message,
+            context_response=context_response,
+            session_id=session_id,
+            exclude_exchange_number=exclude_exchange_number,
+        )
+
+    async def _apply_context_overrides(
+        self,
+        context_response: ContextResponse,
+        attach_card_ids: list[str] | None,
+        scene_override: SceneOverride | None,
+        rp_folder: str,
+    ) -> None:
+        """Apply attached cards and scene overrides to a ContextResponse in place."""
+        # Inject attached cards as extra context documents. The frontend sends the
+        # DB primary key (`story_cards.id`, e.g. "rp_folder:normalized_name") — there
+        # is no `card_id` column, so this MUST query by `id` (the old `WHERE card_id`
+        # referenced a nonexistent column and errored, silently breaking attach).
         if attach_card_ids:
             for card_id in attach_card_ids:
                 card = await self.db.fetch_one(
-                    "SELECT * FROM story_cards WHERE card_id = ? AND rp_folder = ?",
+                    "SELECT * FROM story_cards WHERE id = ? AND rp_folder = ?",
                     [card_id, rp_folder],
                 )
                 if card:
-                    from rp_engine.models.context import ContextDocument
                     context_response.documents.append(ContextDocument(
                         name=card.get("name", card_id),
                         card_type=card.get("card_type", "unknown"),
@@ -561,20 +591,10 @@ class ChatManager:
                 if scene_override.mood:
                     context_response.scene_state.mood = scene_override.mood
             else:
-                from rp_engine.models.context import SceneState
                 context_response.scene_state = SceneState(
                     location=scene_override.location or "Unknown",
                     mood=scene_override.mood,
                 )
-
-        return await self.prompt_assembler.build_messages(
-            rp_folder=rp_folder,
-            branch=branch,
-            user_message=user_message,
-            context_response=context_response,
-            session_id=session_id,
-            exclude_exchange_number=exclude_exchange_number,
-        )
 
     @staticmethod
     def _inject_mode_messages(
@@ -659,6 +679,58 @@ class ChatManager:
         )
         await f
 
+    async def _lazy_create_variant_zero(self, exchange: dict) -> int:
+        """If no variants exist yet, materialize the original response as variant 0.
+
+        Variant 0 is a *virtual* variant representing the original exchange text, so
+        it deliberately carries NULL model/temperature and the exchange's own
+        ``created_at`` (not the promotion time) — this keeps variant 0 sorting first
+        and reading as "the original as written" in any timestamp-ordered variant UI.
+        Returns the variant count after the (possible) insert.
+        """
+        count = await self.db.fetch_val(
+            "SELECT COUNT(*) FROM exchange_variants WHERE exchange_id = ?",
+            [exchange["id"]],
+        )
+        if count == 0:
+            await self._insert_variant_row(
+                exchange,
+                response=exchange["assistant_response"],
+                model=None,
+                temperature=None,
+                is_active=0,
+                created_at=exchange["created_at"],
+            )
+            return 1
+        return count
+
+    async def _insert_variant_row(
+        self,
+        exchange: dict,
+        *,
+        response: str,
+        model: str | None,
+        temperature: float | None,
+        is_active: int,
+        created_at: str | None = None,
+    ) -> int:
+        """Insert a single variant row. Returns the new row id."""
+        ts = created_at or datetime.now(UTC).isoformat()
+        f = await self.db.enqueue_write(
+            """INSERT INTO exchange_variants
+               (exchange_id, rp_folder, branch, exchange_number,
+                assistant_response, model_used, temperature, source,
+                is_active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'llm', ?, ?)""",
+            [
+                exchange["id"], exchange["rp_folder"], exchange["branch"],
+                exchange["exchange_number"], response, model, temperature,
+                is_active, ts,
+            ],
+            priority=PRIORITY_EXCHANGE,
+        )
+        return await f
+
     async def _save_variant(
         self,
         exchange: dict,
@@ -667,31 +739,7 @@ class ChatManager:
         temperature: float,
     ) -> tuple[int, int, int]:
         """Save a new variant for an exchange. Returns (variant_id, variant_index, total)."""
-        exchange_id = exchange["id"]
-
-        # Check variant count
-        count = await self.db.fetch_val(
-            "SELECT COUNT(*) FROM exchange_variants WHERE exchange_id = ?",
-            [exchange_id],
-        )
-
-        # If no variants yet, save the original response as variant 0
-        if count == 0:
-            f = await self.db.enqueue_write(
-                """INSERT INTO exchange_variants
-                   (exchange_id, rp_folder, branch, exchange_number,
-                    assistant_response, model_used, temperature, source,
-                    is_active, created_at)
-                   VALUES (?, ?, ?, ?, ?, NULL, NULL, 'llm', 0, ?)""",
-                [
-                    exchange_id, exchange["rp_folder"], exchange["branch"],
-                    exchange["exchange_number"], exchange["assistant_response"],
-                    exchange["created_at"],
-                ],
-                priority=PRIORITY_EXCHANGE,
-            )
-            await f
-            count = 1
+        count = await self._lazy_create_variant_zero(exchange)
 
         if count >= self._chat_config.max_variants:
             raise ValueError(
@@ -699,42 +747,36 @@ class ChatManager:
                 f"{exchange['exchange_number']}"
             )
 
-        now = datetime.now(UTC).isoformat()
         is_active = 1 if self._chat_config.auto_activate_regeneration else 0
 
         # Deactivate existing variants before inserting new active one
-        if self._chat_config.auto_activate_regeneration:
-            await self._deactivate_all_variants(exchange_id)
+        if is_active:
+            await self._deactivate_all_variants(exchange["id"])
 
-        f = await self.db.enqueue_write(
-            """INSERT INTO exchange_variants
-               (exchange_id, rp_folder, branch, exchange_number,
-                assistant_response, model_used, temperature, source,
-                is_active, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'llm', ?, ?)""",
-            [
-                exchange_id, exchange["rp_folder"], exchange["branch"],
-                exchange["exchange_number"], response, model, temperature,
-                is_active, now,
-            ],
-            priority=PRIORITY_EXCHANGE,
+        variant_id = await self._insert_variant_row(
+            exchange, response=response, model=model,
+            temperature=temperature, is_active=is_active,
         )
-        variant_id = await f
 
         total = count + 1
         variant_index = total - 1
 
         # If auto-activate, update the main exchange table
-        if self._chat_config.auto_activate_regeneration:
-            await self.exchange_writer.update_response(exchange_id, response)
+        if is_active:
+            await self.exchange_writer.update_response(exchange["id"], response)
 
         return variant_id, variant_index, total
 
     async def _increment_continue_count(self, exchange_id: int) -> int:
         """Increment continue_count on the active variant. Returns new count.
 
-        If no variant row exists (exchange was never regenerated), returns 1
-        without writing — continue count is only tracked when variants are in use.
+        Contract: continue_count lives on the variant row, and variants are only
+        lazily materialized on the first *regenerate*. So before any regenerate,
+        there is no row to update and this returns a constant ``1`` without writing
+        — i.e. N continues before the first regenerate all report 1. This is
+        accepted (not a bug): the value is held in frontend state but never rendered
+        to the user, so the pre-variant constant is unobservable. Do not lazy-create
+        a variant here just to track it.
         """
         active_variant = await self.db.fetch_one(
             """SELECT id, continue_count FROM exchange_variants

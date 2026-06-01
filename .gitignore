@@ -13,7 +13,6 @@ data/
 config.yaml
 
 # Tests
-tests/
 test_npc.db
 
 # Dev-only utilities

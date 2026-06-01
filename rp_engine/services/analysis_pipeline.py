@@ -259,8 +259,136 @@ class AnalysisPipeline:
                 exchange_id=exchange_id,
             )
 
-        # 5. Apply trust changes from relationship dynamics
-        for rd in analysis.relationship_dynamics:
+        # 5. Apply trust changes from relationship dynamics.
+        await self._apply_relationship_dynamics(
+            analysis.relationship_dynamics, rp_folder, branch, exchange_id, result,
+        )
+
+        # 6. Add significant events
+        for ev in analysis.story_state.significant_events:
+            await self.state_manager.add_event(
+                event=ev.event,
+                characters=ev.characters,
+                significance=ev.significance,
+                rp_folder=rp_folder,
+                branch=branch,
+                exchange_id=exchange_id,
+            )
+            result.events_added += 1
+
+        # 6b. Store extracted memories
+        for mem in analysis.memories:
+            if mem.description:
+                await self.db.enqueue_write(
+                    """INSERT INTO extracted_memories
+                       (rp_folder, branch, exchange_id, session_id, description,
+                        significance, characters, in_story_timestamp, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                    [rp_folder, branch, exchange_id, exchange.get("session_id"),
+                     mem.description, mem.significance,
+                     json.dumps(mem.characters), mem.timestamp],
+                    priority=PRIORITY_ANALYSIS,
+                )
+                result.memories_added += 1
+
+        # 7. Record new entities in card_gaps + gap exchanges
+        now = datetime.now(UTC).isoformat()
+        combined_text = f"{user_msg}\n{asst_resp}"
+
+        new_entity_groups = [
+            (analysis.new_entities.characters, "character"),
+            (analysis.new_entities.locations, "location"),
+            (analysis.new_entities.concepts, "lore"),
+        ]
+        for entities, gap_type in new_entity_groups:
+            for ent in entities:
+                if ent.name:
+                    await self._track_new_entity(
+                        ent.name, gap_type, rp_folder, branch,
+                        exchange_number, combined_text, now,
+                    )
+                    result.card_gaps_added += 1
+
+        # 7b. Continuity check (optional — disabled by default)
+        if self.continuity_checker:
+            try:
+                cont_warnings = await self.continuity_checker.check_exchange(
+                    exchange_id, analysis, rp_folder, branch,
+                )
+                result.continuity_warnings = len(cont_warnings)
+            except Exception as e:
+                logger.warning("Continuity check failed for exchange %d: %s", exchange_id, e)
+
+        # 7c. Apply custom state changes
+        if self.custom_state_manager and analysis.custom_state_changes:
+            await self._apply_custom_state_changes(
+                analysis.custom_state_changes, rp_folder, branch, exchange_number,
+                schemas=raw_schemas,
+            )
+            result.custom_state_changes = len(analysis.custom_state_changes)
+
+        # 8. Thread counter updates
+        alerts = await self.thread_tracker.update_counters(
+            asst_resp, rp_folder, branch, exchange_id
+        )
+        result.thread_alerts = len(alerts)
+
+        # 9. Timestamp advancement
+        ts_result = await self.timestamp_tracker.advance_time(
+            asst_resp, rp_folder, branch
+        )
+        result.timestamp_advanced = ts_result.new_timestamp is not None
+
+        # 10. Collect manifest entries (flush writes first, then query)
+        await self._flush_analysis_writes()
+        await self._collect_manifest_entries(
+            manifest_id, exchange_id, exchange_number, rp_folder, branch,
+        )
+
+        # 11. Mark analysis as completed
+        future = await self.db.enqueue_write(
+            "UPDATE exchanges SET analysis_status = 'completed' WHERE id = ?",
+            [exchange_id],
+            priority=PRIORITY_ANALYSIS,
+        )
+        await future
+
+        result.status = "completed"
+
+        self._log_analysis_complete(
+            result, exchange_number, rp_folder, branch,
+            manifest_id, model_used, raw_response,
+        )
+
+        return result
+
+    # ===================================================================
+    # State application
+    # ===================================================================
+
+    async def _apply_relationship_dynamics(
+        self,
+        dynamics: list,
+        rp_folder: str,
+        branch: str,
+        exchange_id: int,
+        result: AnalysisResult,
+    ) -> None:
+        """Apply trust changes and emit fallback events from relationship dynamics.
+
+        DIRECTIONAL convention: ``rd.characters`` is ``[truster, trusted]`` — char_a's
+        trust toward char_b changes (``update_trust`` stores ``(char_a, char_b)`` =
+        ``(truster, trusted)`` with no normalization, and trust READS are now
+        direction-aware, so order is load-bearing). The analyzer prompt pins this
+        ordering (see response_analyzer "ORDER MATTERS"), but it is LLM-best-effort,
+        not guaranteed: a mis-ordered pair records the change against the reverse
+        direction. Deterministic write paths (the /relationships/{a}/{b} router and
+        card seeding) are exact; this analysis path is the one best-effort site.
+        Known limitation, documented for Phase 2.
+
+        Mutates ``result`` in place (matching the inline-counter style of steps 3/6).
+        """
+        for rd in dynamics:
             if len(rd.characters) < 2:
                 continue
             char_a, char_b = rd.characters[0], rd.characters[1]
@@ -299,129 +427,33 @@ class AnalysisPipeline:
                 )
                 result.events_added += 1
 
-        # 6. Add significant events
-        for ev in analysis.story_state.significant_events:
-            await self.state_manager.add_event(
-                event=ev.event,
-                characters=ev.characters,
-                significance=ev.significance,
-                rp_folder=rp_folder,
-                branch=branch,
-                exchange_id=exchange_id,
-            )
-            result.events_added += 1
-
-        # 6b. Store extracted memories
-        for mem in analysis.memories:
-            if mem.description:
-                await self.db.enqueue_write(
-                    """INSERT INTO extracted_memories
-                       (rp_folder, branch, exchange_id, session_id, description,
-                        significance, characters, in_story_timestamp, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-                    [rp_folder, branch, exchange_id, exchange.get("session_id"),
-                     mem.description, mem.significance,
-                     json.dumps(mem.characters), mem.timestamp],
-                    priority=PRIORITY_ANALYSIS,
-                )
-                result.events_added += 1
-
-        # 7. Record new entities in card_gaps + gap exchanges
-        now = datetime.now(UTC).isoformat()
-        combined_text = f"{user_msg}\n{asst_resp}"
-
-        for char in analysis.new_entities.characters:
-            if char.name:
-                await self._upsert_card_gap(char.name, "character", rp_folder, branch, now)
-                await self._record_gap_exchange(
-                    char.name, rp_folder, branch, exchange_number,
-                    combined_text, now,
-                )
-                result.card_gaps_added += 1
-        for loc in analysis.new_entities.locations:
-            if loc.name:
-                await self._upsert_card_gap(loc.name, "location", rp_folder, branch, now)
-                await self._record_gap_exchange(
-                    loc.name, rp_folder, branch, exchange_number,
-                    combined_text, now,
-                )
-                result.card_gaps_added += 1
-        for concept in analysis.new_entities.concepts:
-            if concept.name:
-                await self._upsert_card_gap(concept.name, "lore", rp_folder, branch, now)
-                await self._record_gap_exchange(
-                    concept.name, rp_folder, branch, exchange_number,
-                    combined_text, now,
-                )
-                result.card_gaps_added += 1
-
-        # 7b. Continuity check (optional — disabled by default)
-        if self.continuity_checker:
-            try:
-                cont_warnings = await self.continuity_checker.check_exchange(
-                    exchange_id, analysis, rp_folder, branch,
-                )
-                result.continuity_warnings = len(cont_warnings)
-            except Exception as e:
-                logger.warning("Continuity check failed for exchange %d: %s", exchange_id, e)
-
-        # 7c. Apply custom state changes
-        if self.custom_state_manager and analysis.custom_state_changes:
-            await self._apply_custom_state_changes(
-                analysis.custom_state_changes, rp_folder, branch, exchange_number,
-                schemas=raw_schemas,
-            )
-            result.custom_state_changes = len(analysis.custom_state_changes)
-
-        # 8. Thread counter updates
-        alerts = await self.thread_tracker.update_counters(
-            asst_resp, rp_folder, branch, exchange_id
+    def _log_analysis_complete(
+        self,
+        result: AnalysisResult,
+        exchange_number: int,
+        rp_folder: str,
+        branch: str,
+        manifest_id: int,
+        model_used: str | None,
+        raw_response: str | None,
+    ) -> None:
+        """Emit the analysis_complete diagnostic event (no-op when logging disabled)."""
+        if not self.diagnostic_logger:
+            return
+        data = result.model_dump()
+        data.update(
+            exchange_number=exchange_number,
+            rp_folder=rp_folder,
+            branch=branch,
+            manifest_id=manifest_id,
+            model_used=model_used,
         )
-        result.thread_alerts = len(alerts)
-
-        # 9. Timestamp advancement
-        ts_result = await self.timestamp_tracker.advance_time(
-            asst_resp, rp_folder, branch
+        self.diagnostic_logger.log(
+            category="analysis",
+            event="analysis_complete",
+            data=data,
+            content={"raw_response": raw_response[:2000] if raw_response else None},
         )
-        result.timestamp_advanced = ts_result.new_timestamp is not None
-
-        # 9b. Exchange embedding — now happens immediately on save (exchanges.py / auto_save.py).
-        # Analysis pipeline only updates the in_story_timestamp metadata if needed.
-        # Skip duplicate embedding here.
-
-        # 10. Collect manifest entries (flush writes first, then query)
-        await self._flush_analysis_writes()
-        await self._collect_manifest_entries(
-            manifest_id, exchange_id, exchange_number, rp_folder, branch,
-        )
-
-        # 11. Mark analysis as completed
-        future = await self.db.enqueue_write(
-            "UPDATE exchanges SET analysis_status = 'completed' WHERE id = ?",
-            [exchange_id],
-            priority=PRIORITY_ANALYSIS,
-        )
-        await future
-
-        result.status = "completed"
-
-        if self.diagnostic_logger:
-            data = result.model_dump()
-            data.update(
-                exchange_number=exchange_number,
-                rp_folder=rp_folder,
-                branch=branch,
-                manifest_id=manifest_id,
-                model_used=model_used,
-            )
-            self.diagnostic_logger.log(
-                category="analysis",
-                event="analysis_complete",
-                data=data,
-                content={"raw_response": raw_response[:2000] if raw_response else None},
-            )
-
-        return result
 
     # ===================================================================
     # Manifest operations
@@ -844,6 +876,27 @@ class AnalysisPipeline:
     # ===================================================================
     # Card gap helpers
     # ===================================================================
+
+    async def _track_new_entity(
+        self,
+        name: str,
+        gap_type: str,
+        rp_folder: str,
+        branch: str,
+        exchange_number: int,
+        combined_text: str,
+        now: str,
+    ) -> None:
+        """Record one newly-mentioned entity as a card gap + gap exchange.
+
+        ``_upsert_card_gap`` and ``_record_gap_exchange`` are always called together
+        with the same arguments from step 7; this consolidates the pair. Both remain
+        separately callable for callers that want one without the other.
+        """
+        await self._upsert_card_gap(name, gap_type, rp_folder, branch, now)
+        await self._record_gap_exchange(
+            name, rp_folder, branch, exchange_number, combined_text, now,
+        )
 
     async def _upsert_card_gap(
         self, entity_name: str, suggested_type: str, rp_folder: str, branch: str, now: str

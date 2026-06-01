@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -63,7 +64,14 @@ class ExchangeResponse(BaseModel):
     created_at: str
     analysis_status: str = "pending"
     rewound_count: int | None = None
+    new_branch: str | None = None
     idempotent_hit: bool | None = None
+
+
+class DeleteResponse(BaseModel):
+    """Standard response for delete operations."""
+
+    deleted: bool = True
 
 
 class ExchangeDetail(BaseModel):
@@ -95,6 +103,12 @@ class ExchangeListResponse(BaseModel):
 
 
 # --- Search ---
+
+class SearchMode(StrEnum):
+    semantic = "semantic"
+    keyword = "keyword"
+    hybrid = "hybrid"
+
 
 class ExchangeSearchHit(BaseModel):
     exchange_number: int

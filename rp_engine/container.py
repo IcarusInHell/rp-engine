@@ -17,12 +17,14 @@ from rp_engine.services.analysis_pipeline import AnalysisPipeline
 from rp_engine.services.ancestry_resolver import AncestryResolver
 from rp_engine.services.auto_save import AutoSaveManager
 from rp_engine.services.branch_manager import BranchManager
+from rp_engine.services.card_authoring import CardAuthoringService
 from rp_engine.services.card_indexer import CardIndexer
 from rp_engine.services.chat_manager import ChatManager
 from rp_engine.services.context_engine import ContextEngine
 from rp_engine.services.custom_state_manager import CustomStateManager
 from rp_engine.services.diagnostic_logger import DiagnosticLogger
 from rp_engine.services.entity_extractor import EntityExtractor
+from rp_engine.services.exchange_search_service import ExchangeSearchService
 from rp_engine.services.exchange_writer import ExchangeWriter
 from rp_engine.services.file_watcher import FileWatcher
 from rp_engine.services.graph_resolver import GraphResolver
@@ -34,6 +36,7 @@ from rp_engine.services.npc_engine import NPCEngine
 from rp_engine.services.prompt_assembler import PromptAssembler
 from rp_engine.services.recap_builder import RecapBuilder
 from rp_engine.services.response_analyzer import ResponseAnalyzer
+from rp_engine.services.rewind_service import RewindService
 from rp_engine.services.scene_classifier import SceneClassifier
 from rp_engine.services.state_manager import StateManager
 from rp_engine.services.summary_builder import SummaryBuilder
@@ -52,6 +55,7 @@ class ServiceContainer:
 
     db: Database
     card_indexer: CardIndexer
+    card_authoring_service: CardAuthoringService
     vault_root: Path
     file_watcher: FileWatcher
     entity_extractor: EntityExtractor
@@ -77,6 +81,8 @@ class ServiceContainer:
     prompt_assembler: PromptAssembler
     analysis_pipeline: AnalysisPipeline
     exchange_writer: ExchangeWriter
+    rewind_service: RewindService
+    exchange_search_service: ExchangeSearchService
     auto_save_manager: AutoSaveManager
     summary_builder: SummaryBuilder
     recap_builder: RecapBuilder
@@ -127,6 +133,14 @@ class ServiceContainer:
             models=config.llm.models,
             fallback_model=config.llm.fallback_model,
             embedding_fallback=config.llm.embedding_fallback_provider,
+        )
+        # AI-driven card authoring (suggest / generate-name / reciprocal sync)
+        card_authoring_service = CardAuthoringService(
+            db=db,
+            llm_client=llm_client,
+            card_indexer=card_indexer,
+            vault_root=vault_root,
+            guidelines_service=guidelines_service,
         )
         # VectorSearch uses LLMClient.embed as its embed_fn — single key holder
         vector_search = VectorSearch(
@@ -240,6 +254,9 @@ class ServiceContainer:
             writing_intelligence=writing_intelligence,
         )
         custom_state_manager.configure(branch_manager=branch_manager)
+        # NPCEngine is constructed before branch_manager exists; wire it now so
+        # branched-RP reactions walk exchange ancestry (npc-engine-ancestry-gaps).
+        npc_engine.branch_manager = branch_manager
 
         thread_tracker = ThreadTracker(db)
         timestamp_tracker = TimestampTracker(db, state_manager)
@@ -269,6 +286,11 @@ class ServiceContainer:
         )
 
         exchange_writer = ExchangeWriter(db=db, analysis_pipeline=analysis_pipeline, lance_store=lance_store)
+        # Exchange-domain extractions (Phase 7b): rewind workflow + multi-mode search
+        rewind_service = RewindService(db=db, branch_manager=branch_manager)
+        exchange_search_service = ExchangeSearchService(
+            db=db, lance_store=lance_store, branch_manager=branch_manager,
+        )
         auto_save_manager = AutoSaveManager(db=db, exchange_writer=exchange_writer)
         if config.auto_save.enabled:
             auto_save_manager.set_active(True)
@@ -299,6 +321,7 @@ class ServiceContainer:
         return cls(
             db=db,
             card_indexer=card_indexer,
+            card_authoring_service=card_authoring_service,
             vault_root=vault_root,
             file_watcher=file_watcher,
             entity_extractor=entity_extractor,
@@ -324,6 +347,8 @@ class ServiceContainer:
             prompt_assembler=prompt_assembler,
             analysis_pipeline=analysis_pipeline,
             exchange_writer=exchange_writer,
+            rewind_service=rewind_service,
+            exchange_search_service=exchange_search_service,
             auto_save_manager=auto_save_manager,
             summary_builder=summary_builder,
             recap_builder=recap_builder,
