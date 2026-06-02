@@ -102,35 +102,8 @@ class TriggerEvaluator:
                 continue
 
             match_mode = row.get("match_mode", "any")
-            matched_descs: list[str] = []
-            all_pass = True       # stemming-union result
-            all_pass_raw = True   # exact-only result
-            any_pass = False
-            any_pass_raw = False
-
-            # Evaluate ALL conditions (no early break) so a stem-only fire is
-            # detectable by comparing the union result against the raw result.
-            for cond in conditions:
-                passed, passed_raw, detail = await self._evaluate_condition(
-                    cond, text, signals, rp_folder, branch, stem_enabled
-                )
-                if passed:
-                    matched_descs.append(detail)
-                    any_pass = True
-                else:
-                    all_pass = False
-                if passed_raw:
-                    any_pass_raw = True
-                else:
-                    all_pass_raw = False
-
-            matched_now = (
-                (match_mode == "any" and any_pass) or
-                (match_mode == "all" and all_pass)
-            )
-            matched_raw = (
-                (match_mode == "any" and any_pass_raw) or
-                (match_mode == "all" and all_pass_raw)
+            matched_now, matched_raw, matched_descs = await self._match_conditions(
+                conditions, match_mode, text, signals, rp_folder, branch, stem_enabled
             )
 
             # --- delay: require N consecutive matching turns ---
@@ -197,6 +170,85 @@ class TriggerEvaluator:
         # Sort by priority (highest first)
         fired.sort(key=lambda t: t.priority, reverse=True)
         return fired
+
+    async def _match_conditions(
+        self,
+        conditions: list[dict],
+        match_mode: str,
+        text: str,
+        signals: dict[str, float],
+        rp_folder: str,
+        branch: str,
+        stem_enabled: bool,
+    ) -> tuple[bool, bool, list[str]]:
+        """Shared matching core: evaluate a condition list under ``match_mode``.
+
+        Returns ``(matched, matched_raw, matched_descs)`` where ``matched``
+        applies the stemming union and ``matched_raw`` is the exact-only result
+        (so the caller can flag a stem-only fire). ALL conditions are evaluated
+        (no early break) so the raw-vs-union comparison is exact.
+
+        This is the ONE matching implementation: ``evaluate_all`` (situational
+        triggers) and ``evaluate_conditions`` (Phase 5b lorebook) both route
+        through it — there is no second matcher. Note: ``match_mode="all"`` over
+        an EMPTY condition list returns ``matched=True`` (vacuous); callers that
+        treat "no conditions" as "always-on" should handle that flag explicitly
+        rather than passing an empty list.
+        """
+        matched_descs: list[str] = []
+        all_pass = True       # stemming-union result
+        all_pass_raw = True   # exact-only result
+        any_pass = False
+        any_pass_raw = False
+
+        for cond in conditions:
+            passed, passed_raw, detail = await self._evaluate_condition(
+                cond, text, signals, rp_folder, branch, stem_enabled
+            )
+            if passed:
+                matched_descs.append(detail)
+                any_pass = True
+            else:
+                all_pass = False
+            if passed_raw:
+                any_pass_raw = True
+            else:
+                all_pass_raw = False
+
+        matched = (
+            (match_mode == "any" and any_pass) or
+            (match_mode == "all" and all_pass)
+        )
+        matched_raw = (
+            (match_mode == "any" and any_pass_raw) or
+            (match_mode == "all" and all_pass_raw)
+        )
+        return matched, matched_raw, matched_descs
+
+    async def evaluate_conditions(
+        self,
+        conditions: list[dict],
+        match_mode: str,
+        text: str,
+        signals: dict[str, float],
+        rp_folder: str,
+        branch: str,
+    ) -> tuple[bool, bool, list[str]]:
+        """Public reuse seam (Phase 5b lorebook).
+
+        Evaluate a TriggerEvaluator condition list against ``text`` + ``signals``
+        + DB state under ``match_mode``, returning ``(matched, matched_raw,
+        matched_descs)``. Uses the *same* ``_match_conditions`` core as
+        ``evaluate_all`` — a ``near()`` (or any condition) behaves identically
+        for a situational trigger and a lorebook entry. ``branch`` is still
+        required: ``state`` conditions resolve character/relationship/scene
+        state by the live request branch (lorebook *storage* has no branch, but
+        *matching* against state does).
+        """
+        stem_enabled = get_config().prompt.trigger_stemming
+        return await self._match_conditions(
+            conditions, match_mode, text, signals, rp_folder, branch, stem_enabled
+        )
 
     async def evaluate_single(
         self,

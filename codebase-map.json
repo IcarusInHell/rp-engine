@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "generated_at": "2026-06-02T12:01:21.208906+00:00",
+    "generated_at": "2026-06-02T12:07:18.508695+00:00",
     "generator_version": "1.1.0",
     "files_parsed": 157,
     "packages": [
@@ -9,7 +9,7 @@
       "writing_intelligence",
       "pattern_intelligence"
     ],
-    "parse_time_ms": 1575
+    "parse_time_ms": 2725
   },
   "files": {
     "rp_engine/__init__.py": {
@@ -17586,7 +17586,21 @@
               "returns": "list[FiredTrigger]",
               "is_async": true,
               "docstring": "Load enabled triggers, evaluate each, return fired ones sorted by priority.",
-              "lines": 140
+              "lines": 113
+            },
+            "evaluate_conditions": {
+              "params": {
+                "conditions": "list[dict]",
+                "match_mode": "str",
+                "text": "str",
+                "signals": "dict[str, float]",
+                "rp_folder": "str",
+                "branch": "str"
+              },
+              "returns": "tuple[bool, bool, list[str]]",
+              "is_async": true,
+              "docstring": "Public reuse seam (Phase 5b lorebook).",
+              "lines": 24
             },
             "evaluate_single": {
               "params": {
@@ -17603,6 +17617,10 @@
             }
           },
           "private_methods": {
+            "_match_conditions": {
+              "lines": 53,
+              "is_async": true
+            },
             "_evaluate_condition": {
               "lines": 42,
               "is_async": true
@@ -32275,139 +32293,139 @@
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 165,
+          "line": 138,
           "receiver": "row",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 166,
+          "line": 139,
           "receiver": "row",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 167,
+          "line": 140,
           "receiver": "row",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 180,
+          "line": 153,
           "receiver": "row",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 181,
+          "line": 154,
           "receiver": "row",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 182,
+          "line": 155,
           "receiver": "row",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 221,
+          "line": 273,
           "receiver": "row",
           "caller": "TriggerEvaluator.evaluate_single"
-        },
-        {
-          "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 222,
-          "receiver": "row",
-          "caller": "TriggerEvaluator.evaluate_single"
-        },
-        {
-          "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 224,
-          "receiver": "row",
-          "caller": "TriggerEvaluator.evaluate_single"
-        },
-        {
-          "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 234,
-          "receiver": "cond",
-          "caller": "TriggerEvaluator.evaluate_single"
-        },
-        {
-          "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 271,
-          "receiver": "cond",
-          "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
           "line": 274,
+          "receiver": "row",
+          "caller": "TriggerEvaluator.evaluate_single"
+        },
+        {
+          "file": "rp_engine/services/trigger_evaluator.py",
+          "line": 276,
+          "receiver": "row",
+          "caller": "TriggerEvaluator.evaluate_single"
+        },
+        {
+          "file": "rp_engine/services/trigger_evaluator.py",
+          "line": 286,
+          "receiver": "cond",
+          "caller": "TriggerEvaluator.evaluate_single"
+        },
+        {
+          "file": "rp_engine/services/trigger_evaluator.py",
+          "line": 323,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 277,
+          "line": 326,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 278,
+          "line": 329,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 279,
+          "line": 330,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 280,
+          "line": 331,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 287,
+          "line": 332,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 288,
+          "line": 339,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 289,
+          "line": 340,
           "receiver": "cond",
           "caller": "TriggerEvaluator._evaluate_condition"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 444,
+          "line": 341,
+          "receiver": "cond",
+          "caller": "TriggerEvaluator._evaluate_condition"
+        },
+        {
+          "file": "rp_engine/services/trigger_evaluator.py",
+          "line": 496,
           "receiver": "row",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 485,
+          "line": 537,
           "receiver": "row",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 497,
+          "line": 549,
           "receiver": "row",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 560,
+          "line": 612,
           "receiver": "signals",
           "caller": "TriggerEvaluator._eval_signal"
         },
@@ -33353,13 +33371,13 @@
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 210,
+          "line": 262,
           "receiver": "self.db",
           "caller": "TriggerEvaluator.evaluate_single"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 475,
+          "line": 527,
           "receiver": "self.db",
           "caller": "TriggerEvaluator._eval_state"
         },
@@ -33937,13 +33955,13 @@
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 170,
+          "line": 143,
           "receiver": "self.db",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 191,
+          "line": 164,
           "receiver": "self.db",
           "caller": "TriggerEvaluator.evaluate_all"
         },
@@ -34053,7 +34071,7 @@
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 613,
+          "line": 665,
           "receiver": "m",
           "caller": "_first_index"
         }
@@ -34617,19 +34635,19 @@
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 434,
+          "line": 486,
           "receiver": "self.db",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 456,
+          "line": 508,
           "receiver": "self.db",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 462,
+          "line": 514,
           "receiver": "self.db",
           "caller": "TriggerEvaluator._eval_state"
         },
@@ -35759,7 +35777,7 @@
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 382,
+          "line": 434,
           "receiver": "re",
           "caller": "TriggerEvaluator._eval_expression"
         },
@@ -40026,16 +40044,30 @@
           "caller": "TimestampTracker.advance_time"
         }
       ],
-      "_evaluate_condition": [
+      "_match_conditions": [
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 114,
+          "line": 105,
           "receiver": "self",
           "caller": "TriggerEvaluator.evaluate_all"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 229,
+          "line": 249,
+          "receiver": "self",
+          "caller": "TriggerEvaluator.evaluate_conditions"
+        }
+      ],
+      "_evaluate_condition": [
+        {
+          "file": "rp_engine/services/trigger_evaluator.py",
+          "line": 205,
+          "receiver": "self",
+          "caller": "TriggerEvaluator._match_conditions"
+        },
+        {
+          "file": "rp_engine/services/trigger_evaluator.py",
+          "line": 281,
           "receiver": "self",
           "caller": "TriggerEvaluator.evaluate_single"
         }
@@ -40043,7 +40075,7 @@
       "_eval_expression": [
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 274,
+          "line": 326,
           "receiver": "self",
           "caller": "TriggerEvaluator._evaluate_condition"
         }
@@ -40051,7 +40083,7 @@
       "_eval_state": [
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 276,
+          "line": 328,
           "receiver": "self",
           "caller": "TriggerEvaluator._evaluate_condition"
         }
@@ -40059,7 +40091,7 @@
       "_eval_signal": [
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 286,
+          "line": 338,
           "receiver": "self",
           "caller": "TriggerEvaluator._evaluate_condition"
         }
@@ -40067,25 +40099,25 @@
       "_compare_state_value": [
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 445,
+          "line": 497,
           "receiver": "self",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 469,
+          "line": 521,
           "receiver": "self",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 486,
+          "line": 538,
           "receiver": "self",
           "caller": "TriggerEvaluator._eval_state"
         },
         {
           "file": "rp_engine/services/trigger_evaluator.py",
-          "line": 498,
+          "line": 550,
           "receiver": "self",
           "caller": "TriggerEvaluator._eval_state"
         }
