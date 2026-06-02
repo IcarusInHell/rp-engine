@@ -17,6 +17,19 @@ class SessionResponse(BaseModel):
     started_at: str
     ended_at: str | None = None
     metadata: dict | None = None
+    narrator_note: str | None = None
+    narrator_note_depth: int = 2
+
+
+class NarratorNoteBody(BaseModel):
+    """Set/replace the session's narrator note (Phase 5a).
+
+    ``depth`` is the injection depth (>= 1 — depth 0 would never be emitted into
+    the message list); the note injects independent of the global
+    ``prompt.injection`` toggle.
+    """
+    note: str
+    depth: int = 2
 
 
 class TrustChange(BaseModel):

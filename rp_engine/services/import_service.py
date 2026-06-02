@@ -133,17 +133,27 @@ def _validate_zip_entry(info: zipfile.ZipInfo) -> None:
 
 
 def _write_card_files(zf: zipfile.ZipFile, rp_dir: Path) -> int:
-    """Write card .md files from the ZIP, preserving directory structure."""
+    """Write card .md files (and .meta/*.json sidecars) from the ZIP.
+
+    Preserves directory structure. Only .md files count toward the returned card
+    total; sidecars are extracted alongside but not counted (one card == one .md).
+    """
     count = 0
     for entry in zf.namelist():
-        if entry.startswith("cards/") and entry.endswith(".md"):
-            # cards/Story Cards/Characters/Foo.md → Story Cards/Characters/Foo.md
-            rel = entry[len("cards/"):]
-            if not rel:
-                continue
-            target = rp_dir / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(zf.read(entry))
+        if not entry.startswith("cards/"):
+            continue
+        is_md = entry.endswith(".md")
+        is_sidecar = entry.endswith(".json") and "/.meta/" in entry
+        if not (is_md or is_sidecar):
+            continue
+        # cards/Story Cards/Characters/Foo.md → Story Cards/Characters/Foo.md
+        rel = entry[len("cards/"):]
+        if not rel:
+            continue
+        target = rp_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(zf.read(entry))
+        if is_md:
             count += 1
     return count
 

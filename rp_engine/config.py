@@ -80,17 +80,39 @@ class PacingPresets(BaseModel):
     slow: dict[str, int] = {"gentle": 8, "moderate": 15, "strong": 20}
 
 
+class TierThresholds(BaseModel):
+    """Score cutoffs for relevance-based injection tiers (Phase 3 tiered context).
+
+    A card scoring >= ``full`` (or sourced from always_load) gets its complete
+    body; >= ``brief`` gets a compact summary; below ``brief`` gets a one-line
+    reference. Defaults match the source-score layout: always_load=2.0 and
+    keyword=1.0 land in full; trigger=0.9 / semantic=0.8 / graph-1hop=0.6 land in
+    brief; graph-2hop=0.3 lands in reference.
+    """
+    full: float = 1.0
+    brief: float = 0.6
+
+
 class ContextConfig(BaseModel):
     max_documents: int = 5
     max_graph_hops: int = 2
     stale_threshold_turns: int = 8
+    tier_thresholds: TierThresholds = TierThresholds()
     max_past_exchanges: int = 5
     exclude_recent_exchanges: int = 3
     past_exchange_min_score: float = 0.65
     max_extracted_memories: int = 10
     extracted_memory_min_score: float = 0.5
     include_custom_state: bool = True
+    max_card_content_length: int = 5000
     pacing_presets: PacingPresets = PacingPresets()
+    # Phase 5b — file-drop lorebook. Matching reuses TriggerEvaluator; budget is
+    # char-based (mirrors the Phase 3 tiered-context content[:max_len] slicing —
+    # no token estimator). Disabled by default (no # World Info section emitted).
+    lorebook_enabled: bool = False
+    lorebook_global_path: str | None = None   # global-library folder (machine-global)
+    lorebook_budget_chars: int = 4000          # per-RP injection budget
+    lorebook_shared_budget_chars: int = 2000   # global-library injection budget
 
 
 class ChatConfig(BaseModel):
@@ -103,6 +125,80 @@ class ChatConfig(BaseModel):
     auto_activate_regeneration: bool = True
     continue_max_tokens: int = 2000
     auto_detect_truncation: bool = True
+
+
+class InjectionConfig(BaseModel):
+    """Per-section injection depth for dynamic context (SillyTavern Feature A).
+
+    Depth N means the section is injected as a system message N exchange-pairs
+    from the bottom of the message list (the current user turn is the depth-1
+    anchor); depth 0 keeps the section in the top system message (legacy
+    behavior). Only consulted when ``enabled`` is True — default off so Phase 4
+    is a drop-in upgrade and existing prompts are byte-identical until opted in.
+
+    The default ``depths`` map encodes the roadmap's Prompt Structure decision
+    (scene/NPC/threads near recent messages at depth 4, triggered notes at 2,
+    direction at 1). Sections absent from the map stay at depth 0. ``narrator_note``
+    is forward-compat only — its producer ships in Phase 5.
+    """
+    enabled: bool = False
+    depths: dict[str, int] = {
+        "scene_context": 4,
+        "character_states": 4,
+        "custom_state": 4,
+        "npc_briefs": 4,
+        "knowledge_boundaries": 4,
+        "plot_threads": 4,
+        "card_gaps": 4,
+        "triggered_notes": 2,
+        "narrator_note": 2,
+        "direction": 1,
+    }
+
+
+class TokenBudgetAllocation(BaseModel):
+    """Fraction of the total token budget assigned to each prompt region."""
+    system: float = 0.20
+    context: float = 0.15
+    history: float = 0.60
+    reserve: float = 0.05
+
+
+class TokenBudgetConfig(BaseModel):
+    """Token-aware history windowing (SillyTavern Feature B).
+
+    When ``enabled``, history is filled newest-first until the history budget is
+    exhausted instead of the blind ``chat.exchange_window`` count. Default off —
+    legacy ``exchange_window`` behavior is preserved until opted in.
+    """
+    enabled: bool = False
+    model_context_window: int = 128000
+    safety_margin: int = 500
+    allocation: TokenBudgetAllocation = TokenBudgetAllocation()
+
+
+class ExampleDialogueConfig(BaseModel):
+    """Few-shot character dialogue examples (SillyTavern Feature D).
+
+    Parsed from a card body's ``## Example Dialogue`` section at prompt time and
+    injected as user/assistant pairs before real history. PC cards
+    (``is_player_character: true``) are skipped — user-controlled voices need no
+    demonstration. Enabled by default (standard message format, low risk).
+    """
+    enabled: bool = True
+    max_examples: int = 3
+    pin_examples: bool = False
+
+
+class PromptConfig(BaseModel):
+    """SillyTavern-inspired prompt assembly controls (Phase 4 / 5a)."""
+    injection: InjectionConfig = InjectionConfig()
+    token_budget: TokenBudgetConfig = TokenBudgetConfig()
+    example_dialogue: ExampleDialogueConfig = ExampleDialogueConfig()
+    # Phase 5a: morphology-aware trigger/lorebook keyword matching. Default ON
+    # (a fire that matched before still matches — stemming only *adds* matches via
+    # union with raw substring). Global kill-switch back to exact matching.
+    trigger_stemming: bool = True
 
 
 class SearchConfig(BaseModel):
@@ -188,6 +284,7 @@ class RPEngineConfig(BaseSettings):
     llm: LLMConfig = LLMConfig()
     context: ContextConfig = ContextConfig()
     chat: ChatConfig = ChatConfig()
+    prompt: PromptConfig = PromptConfig()
     search: SearchConfig = SearchConfig()
     npc: NPCConfig = NPCConfig()
     trust: TrustConfig = TrustConfig()

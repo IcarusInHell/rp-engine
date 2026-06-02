@@ -30,7 +30,7 @@ from rp_engine.models.story_card import (
 )
 from rp_engine.services.card_authoring import CardAuthoringService
 from rp_engine.services.card_indexer import CARD_TYPE_DIRS, CardIndexer
-from rp_engine.utils.frontmatter import parse_frontmatter, serialize_frontmatter
+from rp_engine.utils.frontmatter import find_sidecar, parse_frontmatter, write_card_files
 from rp_engine.utils.json_helpers import safe_parse_json
 from rp_engine.utils.normalization import generate_card_id
 
@@ -210,8 +210,8 @@ async def create_card(
     if not valid:
         logger.warning("Frontmatter validation errors for %s: %s", card_id, errors)
 
-    content = serialize_frontmatter(frontmatter, card_body)
-    file_path.write_text(content, encoding="utf-8")
+    # Write as body-only .md + .meta/{card_id}.json sidecar (new format).
+    write_card_files(card_dir, card_id, frontmatter, card_body)
 
     await indexer.index_file(rp_folder, file_path)
 
@@ -249,11 +249,14 @@ async def delete_card(
     if not row:
         raise HTTPException(404, detail=f"Card not found: {card_type}/{name}")
 
-    # Delete the file
+    # Delete the file (and its sidecar, if present)
     file_path = vault_root / row["file_path"]
     file_deleted = False
     if file_path.exists():
+        sidecar_path = find_sidecar(file_path)
         file_path.unlink()
+        if sidecar_path is not None:
+            sidecar_path.unlink(missing_ok=True)
         file_deleted = True
 
     # Remove from index (connections, aliases, keywords, story_cards)
@@ -289,11 +292,13 @@ async def update_card(
     if body.frontmatter is not None:
         current_fm.update(body.frontmatter)
 
+    # row["content"] is body-only for sidecar cards; parse_frontmatter strips
+    # any YAML for legacy cards (returns the body unchanged when there is none).
     _, current_body = parse_frontmatter(row["content"] or "")
     new_body = body.content if body.content is not None else current_body
 
-    content = serialize_frontmatter(current_fm, new_body)
-    file_path.write_text(content, encoding="utf-8")
+    # Write as body-only .md + sidecar (migrates legacy cards to new format on edit).
+    write_card_files(file_path.parent, file_path.stem, current_fm, new_body)
 
     rp_folder = row["rp_folder"]
     await indexer.index_file(rp_folder, file_path)

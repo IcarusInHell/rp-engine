@@ -15,6 +15,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from rp_engine.config import get_config
 from rp_engine.database import Database
 from rp_engine.models.trigger import ConditionResult, TriggerTestResult
 from rp_engine.services.state_entry_resolver import (
@@ -22,6 +23,7 @@ from rp_engine.services.state_entry_resolver import (
     latest_scene_state,
 )
 from rp_engine.utils.json_helpers import safe_parse_json_array
+from rp_engine.utils.stemmer import stem, tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +65,24 @@ class TriggerEvaluator:
         signals: dict[str, float],
         current_turn: int,
     ) -> list[FiredTrigger]:
-        """Load enabled triggers, evaluate each, return fired ones sorted by priority."""
+        """Load enabled triggers, evaluate each, return fired ones sorted by priority.
+
+        Firing model (5a):
+        - **delay_turns** N: a condition-driven fire requires N consecutive
+          matching turns (0/1 = fire on first match, the pre-5a behavior).
+        - **sticky_turns** N: after a condition-driven fire, the trigger keeps
+          re-injecting for N-1 further turns even without a fresh match
+          (1 = no persistence, the pre-5a behavior).
+        - **cooldown_turns** still gates fresh condition-driven fires; sticky
+          re-injection rides through it (it's the same fire persisting).
+        Defaults (sticky=1, delay=0, stemming aside) reproduce the old behavior.
+        """
+        stem_enabled = get_config().prompt.trigger_stemming
         rows = await self.db.fetch_all(
             """SELECT id, name, conditions, match_mode, inject_type,
                       inject_content, inject_card_path, priority,
-                      cooldown_turns, last_fired_turn
+                      cooldown_turns, last_fired_turn,
+                      sticky_turns, delay_turns, consecutive_matches
                FROM situational_triggers
                WHERE rp_folder = ? AND enabled = 1""",
             [rp_folder],
@@ -75,44 +90,74 @@ class TriggerEvaluator:
 
         fired: list[FiredTrigger] = []
         for row in rows:
-            # Check cooldown
-            cooldown = row.get("cooldown_turns", 0) or 0
             last_fired = row.get("last_fired_turn")
-            if last_fired is not None and cooldown > 0:
-                if current_turn - last_fired < cooldown:
-                    continue
+            cooldown = row.get("cooldown_turns", 0) or 0
+            sticky_turns = row.get("sticky_turns") or 1
+            delay_turns = row.get("delay_turns") or 0
+            prev_consecutive = row.get("consecutive_matches") or 0
 
-            # Parse conditions JSON
             conditions = safe_parse_json_array(row.get("conditions"))
             if not conditions:
                 logger.warning("Invalid conditions JSON for trigger %s", row["id"])
                 continue
 
-            # Evaluate conditions
             match_mode = row.get("match_mode", "any")
             matched_descs: list[str] = []
-            all_pass = True
+            all_pass = True       # stemming-union result
+            all_pass_raw = True   # exact-only result
+            any_pass = False
+            any_pass_raw = False
 
+            # Evaluate ALL conditions (no early break) so a stem-only fire is
+            # detectable by comparing the union result against the raw result.
             for cond in conditions:
-                passed, detail = await self._evaluate_condition(
-                    cond, text, signals, rp_folder, branch
+                passed, passed_raw, detail = await self._evaluate_condition(
+                    cond, text, signals, rp_folder, branch, stem_enabled
                 )
                 if passed:
                     matched_descs.append(detail)
+                    any_pass = True
                 else:
                     all_pass = False
+                if passed_raw:
+                    any_pass_raw = True
+                else:
+                    all_pass_raw = False
 
-                if match_mode == "any" and passed:
-                    break
-                if match_mode == "all" and not passed:
-                    break
-
-            should_fire = (
-                (match_mode == "any" and len(matched_descs) > 0) or
-                (match_mode == "all" and all_pass and len(matched_descs) > 0)
+            matched_now = (
+                (match_mode == "any" and any_pass) or
+                (match_mode == "all" and all_pass)
+            )
+            matched_raw = (
+                (match_mode == "any" and any_pass_raw) or
+                (match_mode == "all" and all_pass_raw)
             )
 
-            if should_fire:
+            # --- delay: require N consecutive matching turns ---
+            new_consecutive = prev_consecutive + 1 if matched_now else 0
+            delay_satisfied = new_consecutive >= max(1, delay_turns)
+
+            cooldown_blocks = (
+                last_fired is not None and cooldown > 0
+                and current_turn - last_fired < cooldown
+            )
+            condition_fire = matched_now and delay_satisfied and not cooldown_blocks
+
+            # --- sticky: re-inject within N turns of the last condition-driven fire ---
+            sticky_active = (
+                not condition_fire and sticky_turns > 1
+                and last_fired is not None
+                and 0 < current_turn - last_fired < sticky_turns
+            )
+
+            if condition_fire:
+                # A fire is "stem-only" when the union matched but exact would not.
+                if stem_enabled and not matched_raw:
+                    logger.warning(
+                        "Trigger %s (%s) fired ONLY due to stemmed matching "
+                        "(exact match would not fire): %s",
+                        row["id"], row["name"], matched_descs,
+                    )
                 fired.append(FiredTrigger(
                     trigger_id=row["id"],
                     trigger_name=row["name"],
@@ -122,11 +167,30 @@ class TriggerEvaluator:
                     priority=row.get("priority", 0) or 0,
                     matched_conditions=matched_descs,
                 ))
-
-                # Update last_fired_turn (await to ensure committed before next eval)
                 future = await self.db.enqueue_write(
                     "UPDATE situational_triggers SET last_fired_turn = ? WHERE id = ?",
                     [current_turn, row["id"]],
+                )
+                await future
+            elif sticky_active:
+                fired.append(FiredTrigger(
+                    trigger_id=row["id"],
+                    trigger_name=row["name"],
+                    inject_type=row["inject_type"],
+                    inject_content=row.get("inject_content"),
+                    inject_card_path=row.get("inject_card_path"),
+                    priority=row.get("priority", 0) or 0,
+                    matched_conditions=[f"sticky: re-injected (turn {current_turn})"],
+                ))
+                # Sticky does NOT update last_fired_turn — the window is anchored
+                # to the original condition-driven fire.
+
+            # Persist the consecutive counter only when the delay feature is in
+            # use (keeps the common case write-light and byte-identical).
+            if delay_turns > 1 and new_consecutive != prev_consecutive:
+                future = await self.db.enqueue_write(
+                    "UPDATE situational_triggers SET consecutive_matches = ? WHERE id = ?",
+                    [new_consecutive, row["id"]],
                 )
                 await future
 
@@ -158,11 +222,12 @@ class TriggerEvaluator:
         match_mode = row.get("match_mode", "any")
 
         conditions = safe_parse_json_array(row.get("conditions"))
+        stem_enabled = get_config().prompt.trigger_stemming
 
         results: list[ConditionResult] = []
         for i, cond in enumerate(conditions):
-            passed, detail = await self._evaluate_condition(
-                cond, text, signals, rp, branch
+            passed, _passed_raw, detail = await self._evaluate_condition(
+                cond, text, signals, rp, branch, stem_enabled
             )
             results.append(ConditionResult(
                 condition_index=i,
@@ -192,14 +257,23 @@ class TriggerEvaluator:
         signals: dict[str, float],
         rp_folder: str,
         branch: str,
-    ) -> tuple[bool, str]:
-        """Evaluate a single condition. Returns (passed, detail_string)."""
+        stem_enabled: bool,
+    ) -> tuple[bool, bool, str]:
+        """Evaluate a single condition.
+
+        Returns ``(passed, passed_raw, detail)`` where ``passed`` applies the
+        stemming union (when ``stem_enabled``) and ``passed_raw`` is the
+        exact-match-only result. They differ only for ``expression`` conditions;
+        ``state``/``signal`` conditions never stem, so the two are identical.
+        Comparing the two lets the caller flag a *stem-only* fire (over-firing is
+        diagnosable, not silent).
+        """
         cond_type = cond.get("type", "")
 
         if cond_type == "expression":
-            return self._eval_expression(cond.get("expr", ""), text)
+            return self._eval_expression(cond.get("expr", ""), text, stem_enabled)
         elif cond_type == "state":
-            return await self._eval_state(
+            passed, detail = await self._eval_state(
                 cond.get("path", ""),
                 cond.get("operator", "=="),
                 cond.get("value"),
@@ -207,24 +281,38 @@ class TriggerEvaluator:
                 rp_folder,
                 branch,
             )
+            return passed, passed, detail
         elif cond_type == "signal":
-            return self._eval_signal(
+            passed, detail = self._eval_signal(
                 cond.get("signal", ""),
                 cond.get("operator", ">="),
                 cond.get("value", 0),
                 signals,
             )
+            return passed, passed, detail
 
-        return False, f"Unknown condition type: {cond_type}"
+        return False, False, f"Unknown condition type: {cond_type}"
 
-    def _eval_expression(self, expr: str, text: str) -> tuple[bool, str]:
-        """Evaluate expression functions against text."""
+    def _eval_expression(
+        self, expr: str, text: str, stem_enabled: bool,
+    ) -> tuple[bool, bool, str]:
+        """Evaluate expression functions against text.
+
+        Returns ``(passed, passed_raw, detail)``. Stemming is applied as a
+        **union** with raw substring matching: an argument is "present" if it
+        appears as a raw substring **or** (single-token args only) its stem is in
+        the text's stem set. This makes default-on stemming purely additive for
+        positive matchers — a match that fired before still fires. ``none()`` is
+        the one inversion: a stemmed presence can flip it from pass to fail
+        (correctly — "none of these concepts"), so its stem-only result is a
+        *suppression*, surfaced via ``passed_raw``.
+        """
         if not expr:
-            return False, "Empty expression"
+            return False, False, "Empty expression"
 
         match = _EXPR_PATTERN.match(expr.strip())
         if not match:
-            return False, f"Invalid expression syntax: {expr}"
+            return False, False, f"Invalid expression syntax: {expr}"
 
         func_name = match.group(1).lower()
         args_str = match.group(2)
@@ -232,29 +320,38 @@ class TriggerEvaluator:
         # Parse quoted arguments
         str_args = _ARG_PATTERN.findall(args_str)
         text_lower = text.lower()
+        text_stems = _stem_set(text) if stem_enabled else frozenset()
 
         if func_name == "any":
-            for arg in str_args:
-                if arg.lower() in text_lower:
-                    return True, f"any() matched: '{arg}'"
-            return False, f"any() no match in {str_args}"
+            raw = any(_present_raw(a, text_lower) for a in str_args)
+            full = raw or (
+                stem_enabled and any(_present_stem(a, text_stems) for a in str_args)
+            )
+            return full, raw, f"any() match={full} (raw={raw}) in {str_args}"
 
         elif func_name == "all":
-            for arg in str_args:
-                if arg.lower() not in text_lower:
-                    return False, f"all() missing: '{arg}'"
-            return True, f"all() matched: {str_args}"
+            if not str_args:
+                return False, False, "all() requires args"
+            raw = all(_present_raw(a, text_lower) for a in str_args)
+            full = all(
+                _present_raw(a, text_lower)
+                or (stem_enabled and _present_stem(a, text_stems))
+                for a in str_args
+            )
+            return full, raw, f"all() match={full} (raw={raw}): {str_args}"
 
         elif func_name == "none":
-            for arg in str_args:
-                if arg.lower() in text_lower:
-                    return False, f"none() found: '{arg}'"
-            return True, f"none() confirmed absent: {str_args}"
+            raw_found = any(_present_raw(a, text_lower) for a in str_args)
+            full_found = raw_found or (
+                stem_enabled and any(_present_stem(a, text_stems) for a in str_args)
+            )
+            return (not full_found), (not raw_found), (
+                f"none() absent={not full_found} (raw_absent={not raw_found}): {str_args}"
+            )
 
         elif func_name == "near":
             if len(str_args) < 2:
-                return False, "near() requires at least 2 string args"
-            # Parse distance: last non-quoted arg
+                return False, False, "near() requires at least 2 string args"
             distance = 200  # default
             remaining = args_str
             for a in str_args:
@@ -262,47 +359,49 @@ class TriggerEvaluator:
             nums = re.findall(r'\d+', remaining)
             if nums:
                 distance = int(nums[0])
+            w1, w2 = str_args[0], str_args[1]
 
-            w1, w2 = str_args[0].lower(), str_args[1].lower()
-            idx1 = text_lower.find(w1)
-            idx2 = text_lower.find(w2)
-            if idx1 == -1 or idx2 == -1:
-                return False, f"near() word not found: {'w1' if idx1 == -1 else 'w2'}"
-            if abs(idx1 - idx2) <= distance:
-                return True, f"near('{w1}','{w2}',{distance}) = {abs(idx1 - idx2)} chars"
-            return False, f"near() too far: {abs(idx1 - idx2)} > {distance}"
+            def _near(use_stem: bool) -> bool:
+                i1 = _first_index(w1, text_lower, use_stem)
+                i2 = _first_index(w2, text_lower, use_stem)
+                return i1 != -1 and i2 != -1 and abs(i1 - i2) <= distance
+
+            raw = _near(False)
+            full = raw or (stem_enabled and _near(True))
+            return full, raw, f"near('{w1}','{w2}',{distance}) match={full} (raw={raw})"
 
         elif func_name == "count":
             if not str_args:
-                return False, "count() requires a word argument"
-            word = str_args[0].lower()
-            n = text_lower.count(word)
-            # If there's an operator in the remaining args, evaluate it
+                return False, False, "count() requires a word argument"
+            word = str_args[0]
+            n_raw = text_lower.count(word.lower())
+            n_full = max(n_raw, _stem_count(word, text)) if stem_enabled else n_raw
             remaining = args_str
             for a in str_args:
                 remaining = remaining.replace(f'"{a}"', "", 1)
-            # Look for comparison: >=N, >N, ==N, <=N, <N
             comp = re.search(r'([><=!]+)\s*(\d+)', remaining)
             if comp:
                 op, val = comp.group(1), int(comp.group(2))
-                result = _compare(n, op, val)
-                return result, f"count('{word}') = {n} {op} {val}: {result}"
-            # Default: count > 0
-            return n > 0, f"count('{word}') = {n}"
+                raw = _compare(n_raw, op, val)
+                full = _compare(n_full, op, val)
+                return full, raw, f"count('{word}') = {n_full} (raw={n_raw}) {op} {val}: {full}"
+            return (n_full > 0), (n_raw > 0), f"count('{word}') = {n_full} (raw={n_raw})"
 
         elif func_name == "seq":
             if len(str_args) < 2:
-                return False, "seq() requires 2 arguments"
-            w1, w2 = str_args[0].lower(), str_args[1].lower()
-            idx1 = text_lower.find(w1)
-            idx2 = text_lower.find(w2)
-            if idx1 == -1 or idx2 == -1:
-                return False, "seq() word not found"
-            if idx1 < idx2:
-                return True, f"seq('{w1}','{w2}'): {idx1} < {idx2}"
-            return False, f"seq('{w1}','{w2}'): {idx1} >= {idx2}"
+                return False, False, "seq() requires 2 arguments"
+            w1, w2 = str_args[0], str_args[1]
 
-        return False, f"Unknown function: {func_name}"
+            def _seq(use_stem: bool) -> bool:
+                i1 = _first_index(w1, text_lower, use_stem)
+                i2 = _first_index(w2, text_lower, use_stem)
+                return i1 != -1 and i2 != -1 and i1 < i2
+
+            raw = _seq(False)
+            full = raw or (stem_enabled and _seq(True))
+            return full, raw, f"seq('{w1}','{w2}') match={full} (raw={raw})"
+
+        return False, False, f"Unknown function: {func_name}"
 
     async def _eval_state(
         self,
@@ -461,6 +560,58 @@ class TriggerEvaluator:
         score = signals.get(signal_name, 0.0)
         result = _compare(score, operator, value)
         return result, f"signal.{signal_name} = {score:.2f} {operator} {value}: {result}"
+
+
+# Token scan with character offsets, for positional matchers (near/seq).
+_TOKEN_SCAN = re.compile(r"[\w'-]+")
+
+
+def _stem_set(text: str) -> frozenset[str]:
+    """Stemmed token set for a body of text (membership tests)."""
+    return frozenset(stem(t) for t in tokenize(text))
+
+
+def _present_raw(arg: str, text_lower: str) -> bool:
+    """Raw substring presence — the pre-5a behavior."""
+    return arg.lower() in text_lower
+
+
+def _present_stem(arg: str, text_stems: frozenset[str]) -> bool:
+    """Stemmed-token presence — single-token args only (n-grams stay exact,
+    matching the Phase 0 entity_extractor precedent: stem unigrams, never phrases).
+    """
+    toks = tokenize(arg)
+    if len(toks) != 1:
+        return False
+    return stem(toks[0]) in text_stems
+
+
+def _stem_count(word: str, text: str) -> int:
+    """Count occurrences of ``word``'s stem among the text's stemmed tokens."""
+    toks = tokenize(word)
+    if len(toks) != 1:
+        return 0
+    target = stem(toks[0])
+    return sum(1 for t in tokenize(text) if stem(t) == target)
+
+
+def _first_index(word: str, text_lower: str, use_stem: bool) -> int:
+    """First character offset of ``word`` in ``text``.
+
+    Exact mode: raw substring ``.find``. Stem mode (single-token args only):
+    the start offset of the first whole token whose stem matches ``word``'s stem
+    — additive, only consulted when the raw find already failed.
+    """
+    if not use_stem:
+        return text_lower.find(word.lower())
+    toks = tokenize(word)
+    if len(toks) != 1:
+        return text_lower.find(word.lower())
+    target = stem(toks[0])
+    for m in _TOKEN_SCAN.finditer(text_lower):
+        if stem(m.group(0)) == target:
+            return m.start()
+    return -1
 
 
 def _compare(a, op: str, b) -> bool:

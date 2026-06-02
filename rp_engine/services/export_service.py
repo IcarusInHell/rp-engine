@@ -75,13 +75,16 @@ async def export_rp(
         rp_dir = vault_root / rp_folder
         card_count = 0
         if rp_dir.is_dir():
-            # Story Cards/**/*.md
+            # Story Cards/**/*.md plus their .meta/*.json sidecars
             cards_dir = rp_dir / "Story Cards"
             if cards_dir.is_dir():
                 for md_file in cards_dir.rglob("*.md"):
                     rel = md_file.relative_to(rp_dir)
                     zf.writestr(f"cards/{rel.as_posix()}", md_file.read_bytes())
                     card_count += 1
+                for meta_file in cards_dir.rglob(".meta/*.json"):
+                    rel = meta_file.relative_to(rp_dir)
+                    zf.writestr(f"cards/{rel.as_posix()}", meta_file.read_bytes())
 
             # Story_Guidelines.md
             guidelines_path = rp_dir / "RP State" / "Story_Guidelines.md"

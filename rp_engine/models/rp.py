@@ -107,5 +107,19 @@ class GuidelinesResponse(BaseModel):
     include_writing_principles: bool = True
     include_npc_framework: bool = True
     include_output_format: bool = True
+    # Optional per-RP override of dynamic-context injection depths (Phase 4).
+    # Merged over the global PromptConfig.injection.depths defaults at prompt
+    # assembly time. None = no override (use global defaults).
+    injection_depths: dict[str, int] | None = None
+    # Optional per-RP ordering of depth-0 prompt sections (Phase 5a). A list of
+    # section names; named sections are emitted in this order and any depth-0
+    # section omitted from a present list is dropped. None = default order.
+    # Sections pulled to depth > 0 (injection) are unaffected.
+    prompt_order: list[str] | None = None
+    # Optional per-RP lorebook active-set (Phase 5b). A list of lorebook file
+    # stems in the RP's ``Lorebooks/`` folder to activate. None/absent = ALL
+    # per-RP lorebook files are active (file-drop-and-go). Global-library
+    # lorebooks are always available regardless of this list.
+    lorebooks: list[str] | None = None
     avatar: str | None = None
     body: str | None = None

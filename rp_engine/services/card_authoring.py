@@ -32,7 +32,7 @@ from rp_engine.models.story_card import (
 from rp_engine.services.card_indexer import CardIndexer
 from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.services.llm_client import LLMClient
-from rp_engine.utils.frontmatter import parse_frontmatter, serialize_frontmatter
+from rp_engine.utils.frontmatter import parse_frontmatter, write_card_files
 from rp_engine.utils.json_helpers import safe_parse_json
 from rp_engine.utils.normalization import generate_card_id, normalize_key
 from rp_engine.utils.scene_detection import group_into_scenes
@@ -438,11 +438,14 @@ class CardAuthoringService:
                     target_kb["doesnt_know"] = doesnt_know
                     target_fm["knowledge_boundaries"] = target_kb
 
-                # Write updated target card
+                # Write updated target card as body-only .md + sidecar.
+                # content is body-only for sidecar cards; parse_frontmatter strips
+                # YAML for legacy ones (no-op when there is none).
                 _, target_body = parse_frontmatter(target_row["content"] or "")
-                updated_content = serialize_frontmatter(target_fm, target_body)
                 target_file = self.vault_root / target_row["file_path"]
-                target_file.write_text(updated_content, encoding="utf-8")
+                write_card_files(
+                    target_file.parent, target_file.stem, target_fm, target_body
+                )
                 await self.indexer.index_file(rp_folder, target_file)
 
                 result.updated_cards.append(RelationshipSyncEntry(

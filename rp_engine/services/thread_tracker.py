@@ -14,6 +14,7 @@ from rp_engine.database import PRIORITY_ANALYSIS, Database
 from rp_engine.models.analysis import ThreadDetail, ThreadEvidence
 from rp_engine.models.context import ThreadAlert
 from rp_engine.utils.json_helpers import safe_parse_json, safe_parse_json_list
+from rp_engine.utils.stemmer import stem, stem_tokens
 from rp_engine.utils.text import snippet_around_keyword
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,9 @@ class ThreadTracker:
 
         For each active thread:
         - If ANY keyword, related character, or related location appears
-          in response_text (case-insensitive) → reset counter to 0
+          in response_text → reset counter to 0. Single-word keywords match
+          morphology-aware via the shared stemmer (a ``sword`` keyword matches
+          ``swords``); characters/locations match exact (proper nouns).
         - Otherwise → increment counter by 1
         - Check thresholds and generate alerts
         """
@@ -51,6 +54,10 @@ class ThreadTracker:
 
         counters = await self._load_counters(rp_folder, branch)
         text_lower = response_text.lower()
+        # Stemmed token set, computed once and reused per thread. Single-word
+        # keyword matching goes through this so authored keywords match inflected
+        # RP text (consistency invariant: both sides stemmed — see _check_mention).
+        text_stems = stem_tokens(response_text)
         now = datetime.now(UTC).isoformat()
         alerts: list[ThreadAlert] = []
 
@@ -67,7 +74,7 @@ class ThreadTracker:
             thread_id = thread["id"]
             prev_counter = counters.get(thread_id, thread.get("current_counter") or 0)
 
-            mentioned, matched_term = self._check_mention(thread, text_lower)
+            mentioned, matched_term = self._check_mention(thread, text_lower, text_stems)
 
             if mentioned:
                 new_counter = 0
@@ -262,22 +269,42 @@ class ThreadTracker:
         return {r["thread_id"]: r["current_counter"] for r in rows}
 
     @staticmethod
-    def _check_mention(thread: dict, text_lower: str) -> tuple[bool, str | None]:
+    def _check_mention(
+        thread: dict, text_lower: str, text_stems: set[str]
+    ) -> tuple[bool, str | None]:
         """Check if any keyword, character, or location appears in text.
+
+        Keyword matching is morphology-aware via the shared stemmer, mirroring
+        ``entity_extractor``: a **single-word** keyword is stemmed and matched
+        against ``text_stems`` (so a ``sword`` keyword matches ``swords``, and
+        an inflected ``running`` keyword matches ``runs``); **multi-word**
+        keyword phrases stay exact substring matches (stemming a phrase is
+        meaningless). Related characters and locations are proper nouns and are
+        matched exactly — never stemmed (``Ross`` must not become ``Ros``).
+
+        Consistency invariant: both sides go through ``stem`` — the authored
+        keyword here and the runtime text via ``stem_tokens`` in the caller. A
+        one-sided stem silently breaks matching.
 
         Returns (mentioned, matched_term) where matched_term is the first match found.
         """
-        # Keywords
+        # Keywords — stem single words; multi-word phrases stay exact substring.
         for kw in safe_parse_json_list(thread.get("keywords")):
-            if kw.lower() in text_lower:
+            kw_norm = kw.lower().strip()
+            if not kw_norm:
+                continue
+            if " " in kw_norm:
+                if kw_norm in text_lower:
+                    return True, kw
+            elif stem(kw_norm) in text_stems:
                 return True, kw
 
-        # Related characters
+        # Related characters (proper nouns — exact)
         for char in safe_parse_json_list(thread.get("related_characters")):
             if char.lower() in text_lower:
                 return True, char
 
-        # Related locations
+        # Related locations (proper nouns — exact)
         for loc in safe_parse_json_list(thread.get("related_locations")):
             if loc.lower() in text_lower:
                 return True, loc

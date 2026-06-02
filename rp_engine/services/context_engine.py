@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from rp_engine.config import ContextConfig, get_config
 from rp_engine.database import PRIORITY_ANALYSIS, Database
@@ -49,6 +49,7 @@ from rp_engine.services.state_entry_resolver import (
 from rp_engine.services.trigger_evaluator import TriggerEvaluator
 from rp_engine.services.vector_search import VectorSearch
 from rp_engine.utils.json_helpers import safe_parse_json, safe_parse_json_list
+from rp_engine.utils.stemmer import stem_tokens
 from rp_engine.utils.text import hash_content as _hash_content
 from rp_engine.utils.trust import fetch_trust_map
 
@@ -76,6 +77,7 @@ class ContextEngine:
         npc_engine: Any | None = None,
         lance_store: Any | None = None,
         custom_state_manager: Any | None = None,
+        knowledge_resolver: Any | None = None,
     ) -> None:
         self.db = db
         self.entity_extractor = entity_extractor
@@ -90,6 +92,7 @@ class ContextEngine:
         self.npc_engine = npc_engine
         self.lance_store = lance_store
         self.custom_state_manager = custom_state_manager
+        self.knowledge_resolver = knowledge_resolver
         self.branch_manager = None
         self.writing_intelligence = None
         self.diagnostic_logger = None  # injected by container
@@ -204,19 +207,24 @@ class ContextEngine:
             elif ft.inject_type == "card_reference" and ft.inject_card_path:
                 trigger_card_ids.append(ft.inject_card_path)
 
-        # ---- Stage 3: Graph Expansion + Ranking ----
+        # ---- Stage 3: NPC Handling (built BEFORE ranking so briefed NPCs are
+        # excluded from the document pool *before* the max_documents slice — they're
+        # already covered by the NPC Briefs section, and pre-slice exclusion lets
+        # lower-ranked cards backfill the freed slot instead of shipping fewer docs.
+        npc_briefs, flagged_npcs, knowledge_boundaries = await self._build_npc_briefs(
+            extraction, signals, pc_name, rp_folder, branch
+        )
+        npc_brief_ids = {b.card_id for b in npc_briefs if b.card_id}
+
+        # ---- Stage 3.5: Graph Expansion + Ranking ----
         top_cards = await self._collect_and_rank_cards(
-            extraction, always_load_cards, keyword_cards, semantic_results, trigger_card_ids
+            extraction, always_load_cards, keyword_cards, semantic_results,
+            trigger_card_ids, npc_brief_ids,
         )
 
-        # ---- Stage 3.5: Context Sent Filtering ----
+        # ---- Stage 3.6: Context Sent Filtering + Tier Assignment ----
         documents, references = await self._filter_sent_cards(
             top_cards, session_id, current_turn
-        )
-
-        # ---- Stage 4: NPC Handling (no LLM in Phase 2) ----
-        npc_briefs, flagged_npcs = await self._build_npc_briefs(
-            extraction, signals, pc_name, rp_folder, branch
         )
 
         # ---- Stage 4b: Background NPC Reactions (Phase 3) ----
@@ -264,6 +272,7 @@ class ContextEngine:
             npc_briefs=npc_briefs,
             npc_reactions=npc_reactions,
             flagged_npcs=flagged_npcs,
+            knowledge_boundaries=knowledge_boundaries,
             guidelines=guidelines,
             scene_state=scene_state,
             character_states=char_states,
@@ -284,13 +293,19 @@ class ContextEngine:
         keyword_cards: list[dict],
         semantic_results,
         trigger_card_ids: list[str],
+        exclude_ids: set[str] | None = None,
     ) -> list[tuple[str, tuple[dict, str, float]]]:
         """Stage 3: merge all card sources, graph-expand, rank by score, and limit.
 
         Source precedence is insertion-order-based (first writer of an entity_id
         wins its slot): always_load (2.0) → keyword (1.0) → semantic (0.8) →
         trigger (0.9) → graph (0.6/0.3). The final ranking is by score descending.
+
+        ``exclude_ids`` (entity_ids of NPCs that already have a brief) are dropped
+        from the pool *before* the ``max_documents`` slice so lower-ranked cards
+        backfill the freed slots rather than the document count silently shrinking.
         """
+        exclude_ids = exclude_ids or set()
         # Merge all card sources
         all_cards: dict[str, tuple[dict, str, float]] = {}  # entity_id → (card, source, score)
 
@@ -359,8 +374,13 @@ class ContextEngine:
                         graph_score = 0.6 if conn.hop == 1 else 0.3
                         all_cards[conn.entity_id] = (card, "graph", graph_score)
 
-        # Rank and limit
-        ranked = sorted(all_cards.items(), key=lambda x: x[1][2], reverse=True)
+        # Rank and limit — drop briefed-NPC cards from the pool BEFORE the slice
+        # so non-NPC cards backfill the freed slots (pre-slice dedup).
+        ranked = sorted(
+            ((eid, v) for eid, v in all_cards.items() if eid not in exclude_ids),
+            key=lambda x: x[1][2],
+            reverse=True,
+        )
         return ranked[: self.config.max_documents]
 
     async def _filter_sent_cards(
@@ -400,15 +420,18 @@ class ContextEngine:
             else:
                 status = "new"
 
+            tier = self._assign_tier(source, score)
+            content, summary = self._tier_fields(card, tier)
             documents.append(ContextDocument(
                 name=card["name"],
                 card_type=card["card_type"],
                 file_path=card.get("file_path", ""),
                 source=source,
                 relevance_score=score,
-                content=card.get("content") if source != "graph" or score >= 0.6 else None,
-                summary=card.get("summary") if source == "graph" and score < 0.6 else None,
+                content=content,
+                summary=summary,
                 status=status,
+                injection_tier=tier,
             ))
 
             # Record sent (await to ensure committed before next read)
@@ -425,6 +448,43 @@ class ContextEngine:
 
         return documents, references
 
+    def _assign_tier(self, source: str, score: float) -> Literal["full", "brief", "reference"]:
+        """Map a card's source + relevance score to an injection tier.
+
+        always_load cards are ALWAYS full (main characters need full detail every
+        turn — design decision). Everything else is threshold-based against the
+        hot-reloaded ``tier_thresholds``.
+        """
+        if source == "always_load":
+            return "full"
+        thresholds = self.config.tier_thresholds
+        if score >= thresholds.full:
+            return "full"
+        if score >= thresholds.brief:
+            return "brief"
+        return "reference"
+
+    @staticmethod
+    def _tier_fields(card: dict, tier: str) -> tuple[str | None, str | None]:
+        """Resolve the (content, summary) a document carries for its tier.
+
+        full → complete body in ``content`` (assembler applies the safety cap).
+        brief → compact text in ``summary`` (card ``summary`` field, or the first
+          200 chars of body as fallback).
+        reference → one-line ``summary`` (first line of the brief text, ≤120 chars).
+        """
+        body = card.get("content") or ""
+        if tier == "full":
+            return (body or None), None
+
+        brief_text = card.get("summary") or (body[:200] if body else None)
+        if tier == "brief":
+            return None, brief_text
+
+        # reference: a single short line
+        ref = brief_text.splitlines()[0][:120] if brief_text else None
+        return None, ref
+
     async def _build_npc_briefs(
         self,
         extraction,
@@ -432,14 +492,18 @@ class ContextEngine:
         pc_name: str,
         rp_folder: str,
         branch: str,
-    ) -> tuple[list[NPCBrief], list[FlaggedNPC]]:
+    ) -> tuple[list[NPCBrief], list[FlaggedNPC], dict[str, list]]:
         """Stage 4: full briefs for important NPCs, flags for the rest.
 
         Batch-fetches card data, runtime state, and the trust map for every detected
         NPC, then builds a brief (importance ∈ BRIEF_IMPORTANCE) or a FlaggedNPC.
+        Also resolves each briefed NPC's knowledge refs into a per-character map
+        keyed by display name (same key the NPC brief uses, so the prompt section
+        lines up — avoids the name-vs-id drop).
         """
         npc_briefs: list[NPCBrief] = []
         flagged_npcs: list[FlaggedNPC] = []
+        knowledge_map: dict[str, list] = {}
         signal_list = list(signals.keys())
 
         # All detected NPCs (active + referenced)
@@ -507,7 +571,23 @@ class ContextEngine:
                 brief = self.npc_brief_builder.build_brief(
                     npc.name, char_row, pre_trust, signal_list
                 )
+                # card_id (= story_cards.id) lets the document stage dedup this
+                # NPC's card — verified same id space: npc_id keys all_npcs and is
+                # used directly as story_cards.id in the brief card-data fetch.
+                brief.card_id = npc_id
                 npc_briefs.append(brief)
+
+                # Resolve this NPC's knowledge refs from the already-parsed
+                # frontmatter (no extra character fetch). Keyed by display name
+                # to match brief.character.
+                if self.knowledge_resolver:
+                    refs = card_fm.get("knowledge_refs")
+                    if refs:
+                        resolved = await self.knowledge_resolver.resolve_refs(
+                            refs, rp_folder
+                        )
+                        if resolved:
+                            knowledge_map[npc.name] = resolved
             else:
                 reason = "active_in_scene" if npc_id in active_npc_ids else "mentioned"
                 flagged_npcs.append(FlaggedNPC(
@@ -516,7 +596,7 @@ class ContextEngine:
                     reason=reason,
                 ))
 
-        return npc_briefs, flagged_npcs
+        return npc_briefs, flagged_npcs, knowledge_map
 
     async def get_continuity_brief(self, rp_folder: str, branch: str) -> dict:
         """Data-only continuity brief: scene, characters, recent exchanges, threads."""
@@ -665,9 +745,10 @@ class ContextEngine:
         if not rows:
             return []
 
-        # Score memories by relevance to current context
-        msg_lower = user_message.lower()
-        msg_words = set(msg_lower.split())
+        # Score memories by relevance to current context. Both sides are stemmed
+        # so inflected forms overlap (a "running" message scores a "ran"... only
+        # regular forms — "runs"/"running"/"run" — collapse; see utils.stemmer).
+        msg_words = stem_tokens(user_message)
         npc_names_lower = {n.lower() for n in active_npc_names}
 
         scored: list[tuple[float, dict]] = []
@@ -677,8 +758,8 @@ class ContextEngine:
             characters = safe_parse_json_list(characters_raw)
             char_names_lower = {c.lower() for c in characters if c}
 
-            # Score: keyword overlap + NPC mention bonus
-            desc_words = set(desc.split())
+            # Score: keyword overlap + NPC mention bonus (both sides stemmed)
+            desc_words = stem_tokens(desc)
             overlap = len(msg_words & desc_words)
             score = overlap / max(len(msg_words), 1)
 

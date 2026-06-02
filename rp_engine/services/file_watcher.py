@@ -109,6 +109,36 @@ class FileWatcher:
             return parts[0]
         return None
 
+    async def _handle_sidecar_change(
+        self, rp_folder: str, sidecar_path: Path, change_type, watchfiles
+    ) -> None:
+        """Re-index the .md paired with a changed ``.meta/{stem}.json`` sidecar.
+
+        ``.meta/Foo.json`` pairs with ``../Foo.md``. Sidecar add/modify re-indexes
+        the card. Sidecar deletion is logged explicitly (not swallowed): the body-
+        only ``.md`` then has no metadata, so it can no longer parse as a card —
+        we re-index so a card that still carries inline YAML is picked up, and warn
+        loudly if a now-orphaned body-only ``.md`` is left behind.
+        """
+        md_path = sidecar_path.parent.parent / f"{sidecar_path.stem}.md"
+        if not md_path.exists():
+            logger.debug("Sidecar change with no paired .md: %s", sidecar_path)
+            return
+
+        if change_type == watchfiles.Change.deleted:
+            reindexed = await self.card_indexer.index_file(rp_folder, md_path)
+            if not reindexed:
+                logger.warning(
+                    "Sidecar removed (%s); paired .md %s no longer parses as a "
+                    "card — index entry may be stale until the .md is edited or "
+                    "removed",
+                    sidecar_path, md_path,
+                )
+            return
+
+        await self.card_indexer.index_file(rp_folder, md_path)
+        logger.debug("Reindexed via sidecar change: %s → %s", sidecar_path, md_path)
+
     async def _watch_loop(self) -> None:
         """Main watch loop using watchfiles."""
         import watchfiles
@@ -133,8 +163,12 @@ class FileWatcher:
                 for change_type, path_str in changes:
                     file_path = Path(path_str)
 
-                    # Only process .md files
-                    if file_path.suffix != ".md":
+                    is_sidecar = (
+                        file_path.suffix == ".json"
+                        and file_path.parent.name == ".meta"
+                    )
+                    # Only .md cards and their .meta/*.json sidecars are relevant.
+                    if file_path.suffix != ".md" and not is_sidecar:
                         continue
 
                     rp_folder = self._find_rp_folder(file_path)
@@ -142,7 +176,11 @@ class FileWatcher:
                         continue
 
                     try:
-                        if change_type in (
+                        if is_sidecar:
+                            await self._handle_sidecar_change(
+                                rp_folder, file_path, change_type, watchfiles
+                            )
+                        elif change_type in (
                             watchfiles.Change.added,
                             watchfiles.Change.modified,
                         ):

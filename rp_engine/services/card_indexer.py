@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from rp_engine.database import PRIORITY_REINDEX, Database
-from rp_engine.utils.frontmatter import parse_frontmatter
+from rp_engine.utils.frontmatter import find_sidecar, parse_frontmatter, read_sidecar
 from rp_engine.utils.normalization import (
     file_to_key,
     id_to_key,
@@ -323,9 +323,15 @@ class CardIndexer:
         return md_files
 
     def _parse_card_file(self, file_path: Path, rp_folder: str) -> CardData | None:
-        """Read + parse one .md file into a CardData. None if no frontmatter/name."""
+        """Read + parse one .md file into a CardData. None if no frontmatter/name.
+
+        Handles both card formats: sidecar (``.meta/{stem}.json`` + body-only
+        ``.md``) and legacy single-file YAML frontmatter. ``content`` is always
+        the literal ``.md`` text — body-only for sidecar cards, frontmatter+body
+        for legacy ones.
+        """
         raw_content = file_path.read_text(encoding="utf-8")
-        frontmatter, body = parse_frontmatter(raw_content)
+        frontmatter, body = self._read_card_pair(file_path)
         if frontmatter is None:
             return None
 
@@ -345,10 +351,31 @@ class CardIndexer:
             frontmatter=frontmatter,
             content=raw_content,
             body=body,
-            content_hash=self._compute_content_hash(raw_content),
+            content_hash=self._compute_content_hash(file_path),
             file_mtime=file_path.stat().st_mtime,
             always_load=bool(frontmatter.get("always_load")),
         )
+
+    def _read_card_pair(self, md_path: Path) -> tuple[dict | None, str]:
+        """Read a card's metadata and body from disk (sidecar-first, fallback).
+
+        - If ``.meta/{stem}.json`` exists and parses → new format: sidecar holds
+          metadata, the ``.md`` is the pure body.
+        - Otherwise → legacy format: parse YAML frontmatter out of the ``.md``.
+
+        Returns ``(frontmatter_dict | None, body_text)``.
+        """
+        md_content = md_path.read_text(encoding="utf-8")
+
+        sidecar_path = find_sidecar(md_path)
+        if sidecar_path is not None:
+            frontmatter = read_sidecar(sidecar_path)
+            if frontmatter is not None:
+                # New format: the .md file is the body verbatim.
+                return frontmatter, md_content
+            # Malformed sidecar → fall through to legacy parse (don't drop card).
+
+        return parse_frontmatter(md_content)
 
     async def _persist_card_core(self, card: CardData) -> None:
         """Write the 13-column story_cards row for a card."""
@@ -486,9 +513,18 @@ class CardIndexer:
         return None
 
     @staticmethod
-    def _compute_content_hash(content: str) -> str:
-        """SHA-256 hash of file content for change detection."""
-        return hash_content(content)
+    def _compute_content_hash(md_path: Path) -> str:
+        """SHA-256 hash of the .md body plus its sidecar, for change detection.
+
+        New-format cards hash ``body + "\\0" + sidecar_json`` so edits to either
+        file trigger a re-index. Legacy cards (no sidecar) hash the .md alone.
+        """
+        md_content = md_path.read_text(encoding="utf-8")
+        sidecar_path = find_sidecar(md_path)
+        if sidecar_path is not None:
+            combined = md_content + "\0" + sidecar_path.read_text(encoding="utf-8")
+            return hash_content(combined)
+        return hash_content(md_content)
 
     # ------------------------------------------------------------------
     # Internal: Connection extraction

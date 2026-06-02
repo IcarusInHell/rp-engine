@@ -23,6 +23,63 @@ class GuidelinesService:
     def _guidelines_path(self, rp_folder: str) -> Path:
         return self.vault_root / rp_folder / "RP State" / "Story_Guidelines.md"
 
+    @staticmethod
+    def _parse_injection_depths(raw: object) -> dict[str, int] | None:
+        """Coerce a frontmatter ``injection_depths`` map to ``{section: depth}``.
+
+        Returns None when absent or not a mapping (so the global defaults apply).
+        Non-integer / negative depths are dropped with a warning rather than
+        silently mis-placing a section.
+        """
+        if not isinstance(raw, dict):
+            return None
+        cleaned: dict[str, int] = {}
+        for key, value in raw.items():
+            try:
+                depth = int(value)
+            except (TypeError, ValueError):
+                logger.warning("Ignoring non-integer injection_depths[%s]=%r", key, value)
+                continue
+            if depth < 0:
+                logger.warning("Ignoring negative injection_depths[%s]=%d", key, depth)
+                continue
+            cleaned[str(key)] = depth
+        return cleaned or None
+
+    @staticmethod
+    def _parse_prompt_order(raw: object) -> list[str] | None:
+        """Coerce a frontmatter ``prompt_order`` value to a list of section names.
+
+        Returns None when absent or not a list (so the default order applies).
+        Non-string / blank entries are dropped with a warning.
+        """
+        if not isinstance(raw, list):
+            return None
+        cleaned: list[str] = []
+        for item in raw:
+            if not isinstance(item, str) or not item.strip():
+                logger.warning("Ignoring non-string prompt_order entry %r", item)
+                continue
+            cleaned.append(item.strip())
+        return cleaned or None
+
+    @staticmethod
+    def _parse_lorebooks(raw: object) -> list[str] | None:
+        """Coerce a frontmatter ``lorebooks`` value to a list of file stems.
+
+        Returns None when absent or not a list (so ALL per-RP lorebook files are
+        active — file-drop-and-go). Non-string / blank entries are dropped.
+        """
+        if not isinstance(raw, list):
+            return None
+        cleaned: list[str] = []
+        for item in raw:
+            if not isinstance(item, str) or not item.strip():
+                logger.warning("Ignoring non-string lorebooks entry %r", item)
+                continue
+            cleaned.append(item.strip())
+        return cleaned or None
+
     def get_guidelines(self, rp_folder: str) -> GuidelinesResponse | None:
         """Load and cache guidelines. Returns None if file doesn't exist."""
         from rp_engine.utils.frontmatter import parse_file
@@ -57,6 +114,9 @@ class GuidelinesService:
                     include_writing_principles=frontmatter.get("include_writing_principles", True),
                     include_npc_framework=frontmatter.get("include_npc_framework", True),
                     include_output_format=frontmatter.get("include_output_format", True),
+                    injection_depths=self._parse_injection_depths(frontmatter.get("injection_depths")),
+                    prompt_order=self._parse_prompt_order(frontmatter.get("prompt_order")),
+                    lorebooks=self._parse_lorebooks(frontmatter.get("lorebooks")),
                     avatar=frontmatter.get("avatar"),
                     body=file_body.strip() if file_body and file_body.strip() else None,
                 )

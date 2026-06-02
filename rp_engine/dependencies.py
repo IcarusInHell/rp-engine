@@ -29,6 +29,7 @@ from rp_engine.services.exchange_search_service import ExchangeSearchService
 from rp_engine.services.exchange_writer import ExchangeWriter
 from rp_engine.services.graph_resolver import GraphResolver
 from rp_engine.services.guidelines_service import GuidelinesService
+from rp_engine.services.knowledge_resolver import KnowledgeResolver
 from rp_engine.services.llm_client import LLMClient
 from rp_engine.services.npc_brief_builder import NPCBriefBuilder
 from rp_engine.services.npc_engine import NPCEngine
@@ -97,6 +98,10 @@ def get_trigger_evaluator(request: Request) -> TriggerEvaluator:
 
 def get_context_engine(request: Request) -> ContextEngine:
     return _get(request, "context_engine")
+
+
+def get_knowledge_resolver(request: Request) -> KnowledgeResolver:
+    return _get(request, "knowledge_resolver")
 
 
 def get_llm_client(request: Request) -> LLMClient:

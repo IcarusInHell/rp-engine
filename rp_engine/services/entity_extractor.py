@@ -16,6 +16,7 @@ from rp_engine.models.context import (
     ExtractionResult,
     MatchedEntity,
 )
+from rp_engine.utils.stemmer import stem, tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,6 @@ _DIALOGUE_MARKERS = re.compile(
 
 # Dual-POV header pattern: === Name === or ### Name ###
 _POV_HEADER = re.compile(r"(?:^|\n)\s*(?:===|###)\s*(.+?)\s*(?:===|###)")
-
-# Punctuation to strip (keep apostrophes for possessives)
-_PUNCT = re.compile(r"[^\w\s'-]", re.UNICODE)
 
 
 class EntityExtractor:
@@ -80,9 +78,13 @@ class EntityExtractor:
         )
 
     def _tokenize(self, text: str) -> list[str]:
-        """Generate single words + bigrams + trigrams, lowercased."""
-        cleaned = _PUNCT.sub(" ", text.lower())
-        words = [w for w in cleaned.split() if len(w) > 1]
+        """Generate single words + bigrams + trigrams, lowercased.
+
+        Uses the shared ``utils.stemmer.tokenize`` for word splitting (the same
+        splitter scene_classifier uses); n-grams are left as raw surface phrases
+        so multi-word keyword/alias keys still match exactly.
+        """
+        words = [w for w in tokenize(text) if len(w) > 1]
 
         tokens = set(words)
         for i in range(len(words) - 1):
@@ -117,9 +119,15 @@ class EntityExtractor:
         for row in alias_rows:
             alias_map.setdefault(row["alias"], []).append(row["entity_id"])
 
+        # Stem single-word keyword keys so both sides match morphology
+        # (``swords`` text hits a ``sword`` keyword). Multi-word phrase keys are
+        # left exact — stemming a phrase is meaningless. Aliases/names are NOT
+        # stemmed below (proper nouns: ``Ross`` must not become ``Ros``).
         keyword_map: dict[str, list[str]] = {}
         for row in keyword_rows:
-            keyword_map.setdefault(row["keyword"], []).append(row["entity_id"])
+            kw = row["keyword"]
+            key = stem(kw) if " " not in kw else kw
+            keyword_map.setdefault(key, []).append(row["entity_id"])
 
         # Match tokens
         results: dict[str, MatchedEntity] = {}
@@ -137,9 +145,11 @@ class EntityExtractor:
                             score=0.8,
                         )
 
-            # Check keywords (score 0.5)
-            if token in keyword_map:
-                for eid in keyword_map[token]:
+            # Check keywords (score 0.5) — stem single-word tokens to match the
+            # stemmed keyword index; multi-word n-grams stay exact.
+            kw_token = stem(token) if " " not in token else token
+            if kw_token in keyword_map:
+                for eid in keyword_map[kw_token]:
                     if eid not in results or results[eid].score < 0.5:
                         results[eid] = MatchedEntity(
                             entity_id=eid,

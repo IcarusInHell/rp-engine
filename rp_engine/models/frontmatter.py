@@ -82,8 +82,15 @@ class CharacterFrontmatter(BaseModel):
     importance: Importance | None = None
 
     # Knowledge system
-    knowledge_boundaries: dict | None = None
+    knowledge_boundaries: dict | None = None  # legacy free-form dict (knows/doesnt_know); not read by KnowledgeResolver
     aware_of_secrets: list[str] = []
+    # References to knowledge cards this character holds. Each entry is a dict:
+    #   - card_id (required): str — the `card_id` of a knowledge card
+    #   - override (optional): str — free-text belief that replaces the card's `believes`
+    #   - knows_reality (optional): bool (default False) — when True, the character
+    #       knows the truth, so the card's `reality` is injected into their prompt
+    #       section. Leave False/omitted while the character still believes the lie
+    #       (prevents knowledge bleed). Resolved by KnowledgeResolver.
     knowledge_refs: list[dict] | None = None
 
     # Linked cards

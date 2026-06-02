@@ -20,6 +20,7 @@ from rp_engine.dependencies import (
     get_summary_builder,
 )
 from rp_engine.models.session import (
+    NarratorNoteBody,
     NewEntity,
     PlotThreadStatus,
     Recap,
@@ -55,6 +56,8 @@ def _session_from_row(row: dict) -> SessionResponse:
         started_at=row["started_at"],
         ended_at=row.get("ended_at"),
         metadata=metadata,
+        narrator_note=row.get("narrator_note"),
+        narrator_note_depth=row.get("narrator_note_depth") or 2,
     )
 
 
@@ -155,6 +158,55 @@ async def update_session(
     future = await db.enqueue_write(
         "UPDATE sessions SET metadata = ? WHERE id = ?",
         [json.dumps(body.metadata), session_id],
+        priority=PRIORITY_EXCHANGE,
+    )
+    await future
+
+    updated = await db.fetch_one("SELECT * FROM sessions WHERE id = ?", [session_id])
+    return _session_from_row(updated)
+
+
+@router.put("/{session_id}/narrator-note", response_model=SessionResponse)
+async def set_narrator_note(
+    session_id: str,
+    body: NarratorNoteBody,
+    db: Database = Depends(get_db),
+):
+    """Set/replace the session's narrator note (session-persistent GM steering).
+
+    Injected as a system message at ``depth`` near recent history, independent of
+    the global ``prompt.injection`` toggle. ``depth`` is clamped to >= 1 (depth 0
+    would never be emitted into the message list).
+    """
+    row = await db.fetch_one("SELECT * FROM sessions WHERE id = ?", [session_id])
+    if not row:
+        raise HTTPException(404, detail=f"Session {session_id} not found")
+
+    depth = max(1, body.depth)
+    future = await db.enqueue_write(
+        "UPDATE sessions SET narrator_note = ?, narrator_note_depth = ? WHERE id = ?",
+        [body.note, depth, session_id],
+        priority=PRIORITY_EXCHANGE,
+    )
+    await future
+
+    updated = await db.fetch_one("SELECT * FROM sessions WHERE id = ?", [session_id])
+    return _session_from_row(updated)
+
+
+@router.delete("/{session_id}/narrator-note", response_model=SessionResponse)
+async def clear_narrator_note(
+    session_id: str,
+    db: Database = Depends(get_db),
+):
+    """Clear the session's narrator note."""
+    row = await db.fetch_one("SELECT * FROM sessions WHERE id = ?", [session_id])
+    if not row:
+        raise HTTPException(404, detail=f"Session {session_id} not found")
+
+    future = await db.enqueue_write(
+        "UPDATE sessions SET narrator_note = NULL WHERE id = ?",
+        [session_id],
         priority=PRIORITY_EXCHANGE,
     )
     await future

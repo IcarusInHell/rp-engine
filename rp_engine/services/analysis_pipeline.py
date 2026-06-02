@@ -65,6 +65,7 @@ class AnalysisPipeline:
         continuity_checker=None,
         custom_state_manager=None,
         analysis_config: AnalysisConfig | None = None,
+        knowledge_resolver=None,
     ) -> None:
         self.db = db
         self.response_analyzer = response_analyzer
@@ -75,6 +76,7 @@ class AnalysisPipeline:
         self.lance_store = lance_store
         self.continuity_checker = continuity_checker
         self.custom_state_manager = custom_state_manager
+        self.knowledge_resolver = knowledge_resolver
         self._analysis_config_override: AnalysisConfig | None = analysis_config
         self._queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue()
         self._consumer_task: asyncio.Task | None = None
@@ -290,6 +292,18 @@ class AnalysisPipeline:
                     priority=PRIORITY_ANALYSIS,
                 )
                 result.memories_added += 1
+
+        # 6c. Apply knowledge changes — the analyzer already extracted
+        # knowledge_boundaries (no extra LLM call). When a character learns
+        # something, mark the matching existing knowledge ref as known-truth.
+        # Precision-first: the resolver skips (and logs) ambiguous/no matches
+        # rather than risk a wrong write that would leak the wrong reality.
+        if self.knowledge_resolver:
+            for kb in analysis.knowledge_boundaries:
+                try:
+                    await self.knowledge_resolver.apply_knowledge_change(kb, rp_folder)
+                except Exception as e:
+                    logger.warning("Knowledge change apply failed for %r: %s", kb.who, e)
 
         # 7. Record new entities in card_gaps + gap exchanges
         now = datetime.now(UTC).isoformat()

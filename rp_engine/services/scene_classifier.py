@@ -8,7 +8,6 @@ Returns a dict of signal names → normalized scores (0.0-1.0).
 from __future__ import annotations
 
 import logging
-import re
 
 from rp_engine.database import Database
 from rp_engine.services.state_entry_resolver import (
@@ -16,6 +15,7 @@ from rp_engine.services.state_entry_resolver import (
     latest_scene_state,
 )
 from rp_engine.utils.json_helpers import safe_parse_json_array
+from rp_engine.utils.stemmer import stem, stem_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +160,20 @@ MOOD_BOOSTS: list[tuple[str, str, float]] = [
     ("chaotic", "combat", 0.1),
 ]
 
-# Word boundary pattern for whole-word matching
-_WORD_SPLIT = re.compile(r"[^\w'-]+", re.UNICODE)
+# Precompute stemmed cluster keys at module load so both sides of the match
+# are stemmed consistently. Single-word keys are stemmed and matched by token
+# equality; multi-word keys keep substring matching (stemming a phrase is
+# meaningless). Structure: signal -> intensity -> (stemmed_single_keys, multi_keys)
+_STEMMED_CLUSTERS: dict[str, dict[str, tuple[set[str], list[str]]]] = {
+    signal: {
+        intensity: (
+            {stem(kw) for kw in keywords if " " not in kw},
+            [kw for kw in keywords if " " in kw],
+        )
+        for intensity, keywords in intensities.items()
+    }
+    for signal, intensities in SIGNAL_CLUSTERS.items()
+}
 
 
 class SceneClassifier:
@@ -202,20 +214,24 @@ class SceneClassifier:
         }
 
     def _score_text(self, text: str) -> dict[str, float]:
-        """Count weighted keyword matches per signal category."""
-        words = set(_WORD_SPLIT.split(text.lower()))
+        """Count weighted keyword matches per signal category.
+
+        Single-word keys match stemmed text tokens (both sides stemmed, so
+        ``swords`` hits a ``sword`` cluster); multi-word keys match by substring.
+        """
+        lower = text.lower()
+        stemmed_words = stem_tokens(text)
         scores: dict[str, float] = {}
 
-        for signal, intensities in SIGNAL_CLUSTERS.items():
+        for signal, intensities in _STEMMED_CLUSTERS.items():
             total = 0.0
-            for intensity, keywords in intensities.items():
+            for intensity, (single_keys, multi_keys) in intensities.items():
                 weight = WEIGHT_MAP[intensity]
-                for kw in keywords:
-                    if " " in kw:
-                        # Multi-word: check substring
-                        if kw in text.lower():
-                            total += weight
-                    elif kw in words:
+                for kw in single_keys:
+                    if kw in stemmed_words:
+                        total += weight
+                for kw in multi_keys:
+                    if kw in lower:
                         total += weight
             if total > 0:
                 scores[signal] = total

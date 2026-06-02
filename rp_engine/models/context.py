@@ -30,6 +30,12 @@ class ContextDocument(BaseModel):
     content: str | None = None
     summary: str | None = None
     status: Literal["new", "updated"]
+    # Relevance-based injection depth (Phase 3 tiered context). "full" = complete
+    # body, "brief" = compact summary, "reference" = one-line. Assigned in the
+    # context engine from the relevance score; the prompt assembler formats each
+    # tier differently. Defaults to "full" so directly-constructed/attached docs
+    # (e.g. chat_manager's attach_card_ids path) keep their complete body.
+    injection_tier: Literal["full", "brief", "reference"] = "full"
 
 
 class ContextReference(BaseModel):
@@ -41,6 +47,7 @@ class ContextReference(BaseModel):
 
 class NPCBrief(BaseModel):
     character: str
+    card_id: str | None = None  # story_cards.id — used to dedup the NPC's card from documents
     importance: str | None = None
     archetype: str | None = None
     secondary_archetype: str | None = None
@@ -57,6 +64,24 @@ class FlaggedNPC(BaseModel):
     character: str
     importance: str | None = None
     reason: str
+
+
+class ResolvedKnowledge(BaseModel):
+    """A character's resolved knowledge entry: what they believe about a topic.
+
+    Produced by ``KnowledgeResolver`` from a character's ``knowledge_refs`` →
+    knowledge card. ``believes`` is what the LLM should portray the character as
+    thinking. ``reality`` (the actual truth) is populated **only** when the
+    character's ref sets ``knows_reality: true`` — otherwise it stays ``None`` to
+    prevent the LLM leaking truths the character doesn't know (knowledge bleed).
+    """
+    card_id: str
+    topic: str | None = None
+    believes: list[str] = []
+    reality: list[str] | None = None  # only set when knows_reality is true
+    confidence: str | None = None
+    source: str | None = None
+    knows_reality: bool = False
 
 
 class SceneState(BaseModel):
@@ -97,6 +122,22 @@ class TriggeredNote(BaseModel):
     content: str
     priority: int = 0
     signals_matched: list[str] = []
+
+
+class LorebookEntryHit(BaseModel):
+    """A lorebook entry that matched at Stage 2.5 and survived the budget fill.
+
+    Mirrors ``TriggeredNote`` (fired triggers → ``# Triggered Notes``): matched
+    lorebook entries → ``# World Info``. Matching reuses ``TriggerEvaluator``.
+    """
+    entry_id: int
+    name: str
+    content: str
+    scope: Literal["rp", "global"]
+    budget_weight: int = 1
+    depth: int | None = None
+    matched_conditions: list[str] = []
+    stem_only: bool = False  # fired only due to stemmed matching (observability)
 
 
 class CardGap(BaseModel):
@@ -149,11 +190,13 @@ class ContextResponse(BaseModel):
     npc_briefs: list[NPCBrief] = []
     npc_reactions: list[NPCReaction] = []
     flagged_npcs: list[FlaggedNPC] = []
+    knowledge_boundaries: dict[str, list[ResolvedKnowledge]] = {}  # keyed by character display name
     guidelines: GuidelinesResponse | None = None
     scene_state: SceneState = SceneState()
     character_states: dict[str, CharacterState] = {}
     thread_alerts: list[ThreadAlert] = []
     triggered_notes: list[TriggeredNote] = []
+    lorebook_entries: list[LorebookEntryHit] = []
     card_gaps: list[CardGap] = []
     past_exchanges: list[PastExchangeHit] = []
     extracted_memories: list[ExtractedMemoryHit] = []

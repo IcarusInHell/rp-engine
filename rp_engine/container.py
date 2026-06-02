@@ -21,6 +21,7 @@ from rp_engine.services.card_authoring import CardAuthoringService
 from rp_engine.services.card_indexer import CardIndexer
 from rp_engine.services.chat_manager import ChatManager
 from rp_engine.services.context_engine import ContextEngine
+from rp_engine.services.knowledge_resolver import KnowledgeResolver
 from rp_engine.services.custom_state_manager import CustomStateManager
 from rp_engine.services.diagnostic_logger import DiagnosticLogger
 from rp_engine.services.entity_extractor import EntityExtractor
@@ -63,6 +64,7 @@ class ServiceContainer:
     graph_resolver: GraphResolver
     vector_search: VectorSearch
     trigger_evaluator: TriggerEvaluator
+    knowledge_resolver: KnowledgeResolver
     context_engine: ContextEngine
     llm_client: LLMClient
     npc_engine: NPCEngine
@@ -231,6 +233,16 @@ class ServiceContainer:
             lance_store=lance_store,
         )
 
+        # KnowledgeResolver: read path (resolve refs → beliefs) needs db +
+        # graph_resolver; write path (apply learned info) needs card_indexer +
+        # vault_root. All four exist by now, so wire it as a full dependency.
+        knowledge_resolver = KnowledgeResolver(
+            db=db,
+            graph_resolver=graph_resolver,
+            card_indexer=card_indexer,
+            vault_root=vault_root,
+        )
+
         context_engine = ContextEngine(
             db=db,
             entity_extractor=entity_extractor,
@@ -244,6 +256,7 @@ class ServiceContainer:
             npc_engine=npc_engine,
             lance_store=lance_store,
             custom_state_manager=custom_state_manager,
+            knowledge_resolver=knowledge_resolver,
         )
 
         branch_manager = BranchManager(db=db, state_manager=state_manager, resolver=ancestry_resolver)
@@ -283,6 +296,7 @@ class ServiceContainer:
             lance_store=lance_store,
             continuity_checker=continuity_checker,
             custom_state_manager=custom_state_manager,
+            knowledge_resolver=knowledge_resolver,
         )
 
         exchange_writer = ExchangeWriter(db=db, analysis_pipeline=analysis_pipeline, lance_store=lance_store)
@@ -329,6 +343,7 @@ class ServiceContainer:
             graph_resolver=graph_resolver,
             vector_search=vector_search,
             trigger_evaluator=trigger_evaluator,
+            knowledge_resolver=knowledge_resolver,
             context_engine=context_engine,
             llm_client=llm_client,
             npc_engine=npc_engine,

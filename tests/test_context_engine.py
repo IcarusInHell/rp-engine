@@ -100,7 +100,7 @@ async def test_npc_brief_pre_trust_is_directional_npc_to_pc(seeded_rp):
         ],
     )
 
-    npc_briefs, _flagged = await seeded_rp.container.context_engine._build_npc_briefs(
+    npc_briefs, _flagged, _knowledge = await seeded_rp.container.context_engine._build_npc_briefs(
         extraction, {}, pc, rp, branch
     )
 
