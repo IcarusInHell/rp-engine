@@ -86,6 +86,16 @@ async def export_rp(
                     rel = meta_file.relative_to(rp_dir)
                     zf.writestr(f"cards/{rel.as_posix()}", meta_file.read_bytes())
 
+            # Lorebooks/**/*.{json,md} + routing sidecars (.meta/*.lorebook.json).
+            # Per-RP lorebook files travel with the RP; the global library does
+            # NOT (it's machine-global, not RP-scoped).
+            lorebooks_dir = rp_dir / "Lorebooks"
+            if lorebooks_dir.is_dir():
+                for lb_file in lorebooks_dir.rglob("*"):
+                    if lb_file.is_file() and lb_file.suffix in (".json", ".md"):
+                        rel = lb_file.relative_to(rp_dir)
+                        zf.writestr(f"lorebooks/{rel.as_posix()}", lb_file.read_bytes())
+
             # Story_Guidelines.md
             guidelines_path = rp_dir / "RP State" / "Story_Guidelines.md"
             if guidelines_path.is_file():

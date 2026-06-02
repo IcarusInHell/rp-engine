@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 from rp_engine.services.card_indexer import CardIndexer
 
@@ -29,11 +30,18 @@ class FileWatcher:
         vault_root: Path,
         rp_folders: list[str],
         debounce_ms: int = 500,
+        lorebook_indexer: Any = None,
+        lorebook_global_path: str | None = None,
     ) -> None:
         self.card_indexer = card_indexer
         self.vault_root = vault_root
         self.rp_folders = rp_folders
         self.debounce_ms = debounce_ms
+        # Phase 5b — lorebook files (per-RP Lorebooks/ + a global library path).
+        self.lorebook_indexer = lorebook_indexer
+        self.lorebook_global_path = (
+            Path(lorebook_global_path) if lorebook_global_path else None
+        )
         self._task: asyncio.Task | None = None
         self._running = False
         self.diagnostic_logger = None  # injected by container
@@ -96,6 +104,11 @@ class FileWatcher:
             rp_state = self.vault_root / folder / "RP State"
             if rp_state.is_dir():
                 paths.append(rp_state)
+            lorebooks = self.vault_root / folder / "Lorebooks"
+            if self.lorebook_indexer and lorebooks.is_dir():
+                paths.append(lorebooks)
+        if self.lorebook_indexer and self.lorebook_global_path and self.lorebook_global_path.is_dir():
+            paths.append(self.lorebook_global_path)
         return paths
 
     def _find_rp_folder(self, file_path: Path) -> str | None:
@@ -139,6 +152,56 @@ class FileWatcher:
         await self.card_indexer.index_file(rp_folder, md_path)
         logger.debug("Reindexed via sidecar change: %s → %s", sidecar_path, md_path)
 
+    def _lorebook_scope(self, file_path: Path) -> tuple[str, str | None] | None:
+        """Classify a path as a lorebook file: ('global', None), ('rp', folder),
+        or None if it isn't one. Global-library files live outside the vault."""
+        if self.lorebook_global_path:
+            try:
+                file_path.relative_to(self.lorebook_global_path)
+                return ("global", None)
+            except ValueError:
+                pass
+        rp = self._find_rp_folder(file_path)
+        if rp:
+            try:
+                rel = file_path.relative_to(self.vault_root / rp)
+                if rel.parts and rel.parts[0] == "Lorebooks":
+                    return ("rp", rp)
+            except ValueError:
+                pass
+        return None
+
+    async def _handle_lorebook_change(
+        self, scope: str, rp_folder: str | None, file_path: Path, change_type, watchfiles
+    ) -> None:
+        """Re-index a changed lorebook content file or routing sidecar.
+
+        A routing sidecar (``.meta/{stem}.lorebook.json``) re-indexes its paired
+        content file (the routing overlay changed what fires); deletion of the
+        sidecar also re-indexes (the file falls back to coarse). A content file
+        add/modify re-indexes; deletion removes its entries."""
+        name = file_path.name
+        if file_path.parent.name == ".meta" and name.endswith(".lorebook.json"):
+            content_stem = name[: -len(".lorebook.json")]
+            content_dir = file_path.parent.parent
+            for ext in (".json", ".md"):
+                cf = content_dir / f"{content_stem}{ext}"
+                if cf.exists():
+                    await self.lorebook_indexer.index_file(scope, rp_folder, cf)
+                    logger.debug("Reindexed lorebook via routing sidecar: %s → %s", file_path, cf)
+                    return
+            logger.warning("Lorebook routing sidecar %s has no paired content file", file_path)
+            return
+
+        if file_path.suffix not in (".json", ".md"):
+            return
+        if change_type == watchfiles.Change.deleted:
+            await self.lorebook_indexer.remove_file(file_path)
+            logger.debug("Removed lorebook: %s", file_path)
+        else:
+            await self.lorebook_indexer.index_file(scope, rp_folder, file_path)
+            logger.debug("Reindexed lorebook: %s", file_path)
+
     async def _watch_loop(self) -> None:
         """Main watch loop using watchfiles."""
         import watchfiles
@@ -162,6 +225,19 @@ class FileWatcher:
 
                 for change_type, path_str in changes:
                     file_path = Path(path_str)
+
+                    # Lorebook paths route first — a Lorebooks/.meta/*.lorebook.json
+                    # routing sidecar would otherwise be mistaken for a card sidecar.
+                    if self.lorebook_indexer:
+                        lb = self._lorebook_scope(file_path)
+                        if lb is not None:
+                            try:
+                                await self._handle_lorebook_change(
+                                    lb[0], lb[1], file_path, change_type, watchfiles
+                                )
+                            except Exception:
+                                logger.exception("Error processing lorebook change: %s", file_path)
+                            continue
 
                     is_sidecar = (
                         file_path.suffix == ".json"

@@ -80,6 +80,7 @@ async def import_rp(
         rp_dir.mkdir(parents=True, exist_ok=True)
         try:
             stats.cards_written = _write_card_files(zf, rp_dir)
+            _write_lorebook_files(zf, rp_dir)
 
             # ---- Write guidelines ----
             if "guidelines.md" in zf.namelist():
@@ -154,6 +155,29 @@ def _write_card_files(zf: zipfile.ZipFile, rp_dir: Path) -> int:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(zf.read(entry))
         if is_md:
+            count += 1
+    return count
+
+
+def _write_lorebook_files(zf: zipfile.ZipFile, rp_dir: Path) -> int:
+    """Write per-RP Lorebooks/ files (.json/.md + routing sidecars) from the ZIP.
+
+    Returns the count of content files (.json/.md, excluding .meta/ sidecars).
+    The server re-indexes lorebooks into lorebook_entries on next start."""
+    count = 0
+    for entry in zf.namelist():
+        if not entry.startswith("lorebooks/"):
+            continue
+        if not (entry.endswith(".json") or entry.endswith(".md")):
+            continue
+        rel = entry[len("lorebooks/"):]
+        if not rel:
+            continue
+        target = rp_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(zf.read(entry))
+        # Count content files only (sidecars live under .meta/ — overlay, not content).
+        if "/.meta/" not in entry:
             count += 1
     return count
 

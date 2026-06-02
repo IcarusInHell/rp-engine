@@ -1,15 +1,15 @@
 {
   "_meta": {
-    "generated_at": "2026-06-02T12:21:51.582881+00:00",
+    "generated_at": "2026-06-02T12:38:18.029369+00:00",
     "generator_version": "1.1.0",
-    "files_parsed": 159,
+    "files_parsed": 160,
     "packages": [
       "rp_engine",
       "npc_intelligence",
       "writing_intelligence",
       "pattern_intelligence"
     ],
-    "parse_time_ms": 1743
+    "parse_time_ms": 2552
   },
   "files": {
     "rp_engine/__init__.py": {
@@ -1121,6 +1121,14 @@
               "type": "KnowledgeResolver",
               "required": true
             },
+            "lorebook_indexer": {
+              "type": "LorebookIndexer",
+              "required": true
+            },
+            "lorebook_service": {
+              "type": "LorebookService",
+              "required": true
+            },
             "context_engine": {
               "type": "ContextEngine",
               "required": true
@@ -1450,6 +1458,12 @@
           "rp_engine.services.llm_client": [
             "LLMClient"
           ],
+          "rp_engine.services.lorebook_indexer": [
+            "LorebookIndexer"
+          ],
+          "rp_engine.services.lorebook_service": [
+            "LorebookService"
+          ],
           "rp_engine.services.npc_brief_builder": [
             "NPCBriefBuilder"
           ],
@@ -1604,6 +1618,24 @@
             "request": "Request"
           },
           "returns": "KnowledgeResolver",
+          "is_async": false,
+          "docstring": null,
+          "lines": 2
+        },
+        "get_lorebook_indexer": {
+          "params": {
+            "request": "Request"
+          },
+          "returns": "LorebookIndexer",
+          "is_async": false,
+          "docstring": null,
+          "lines": 2
+        },
+        "get_lorebook_service": {
+          "params": {
+            "request": "Request"
+          },
+          "returns": "LorebookService",
           "is_async": false,
           "docstring": null,
           "lines": 2
@@ -1863,6 +1895,7 @@
             "custom_state",
             "diagnostics",
             "exchanges",
+            "lorebook",
             "npc",
             "openai_compat",
             "prompt",
@@ -10909,6 +10942,134 @@
         }
       }
     },
+    "rp_engine/routers/lorebook.py": {
+      "imports": {
+        "internal": {
+          "rp_engine.config": [
+            "get_config"
+          ],
+          "rp_engine.dependencies": [
+            "get_guidelines_service",
+            "get_lorebook_indexer",
+            "get_vault_root"
+          ],
+          "rp_engine.services.guidelines_service": [
+            "GuidelinesService"
+          ],
+          "rp_engine.services.lorebook_indexer": [
+            "LorebookIndexer"
+          ],
+          "rp_engine.utils.frontmatter": [
+            "parse_file",
+            "serialize_frontmatter"
+          ]
+        },
+        "third_party": [
+          "__future__",
+          "fastapi",
+          "pydantic"
+        ],
+        "stdlib": [
+          "logging",
+          "pathlib"
+        ]
+      },
+      "classes": {
+        "LorebookFile": {
+          "bases": [
+            "BaseModel"
+          ],
+          "docstring": null,
+          "fields": {
+            "stem": {
+              "type": "str",
+              "required": true
+            },
+            "scope": {
+              "type": "str",
+              "required": true
+            },
+            "path": {
+              "type": "str",
+              "required": true
+            },
+            "active": {
+              "type": "bool",
+              "required": true
+            }
+          }
+        },
+        "LorebookListResponse": {
+          "bases": [
+            "BaseModel"
+          ],
+          "docstring": null,
+          "fields": {
+            "enabled": {
+              "type": "bool",
+              "required": true
+            },
+            "active_set": {
+              "type": "list[str] | None",
+              "required": false
+            },
+            "files": {
+              "type": "list[LorebookFile]",
+              "required": true
+            }
+          }
+        },
+        "ActiveSetUpdate": {
+          "bases": [
+            "BaseModel"
+          ],
+          "docstring": null,
+          "fields": {
+            "lorebooks": {
+              "type": "list[str]",
+              "required": true
+            }
+          }
+        }
+      },
+      "functions": {
+        "list_lorebooks": {
+          "params": {
+            "rp_folder": "str",
+            "vault_root": "Path",
+            "indexer": "LorebookIndexer",
+            "guidelines_svc": "GuidelinesService"
+          },
+          "returns": "",
+          "is_async": true,
+          "docstring": "List available lorebook files (per-RP + global) with active flags.",
+          "lines": 25
+        },
+        "set_active_set": {
+          "params": {
+            "body": "ActiveSetUpdate",
+            "rp_folder": "str",
+            "vault_root": "Path",
+            "indexer": "LorebookIndexer",
+            "guidelines_svc": "GuidelinesService"
+          },
+          "returns": "",
+          "is_async": true,
+          "docstring": "Write the per-RP ``lorebooks:`` active-set to Story_Guidelines.md frontmatter.",
+          "lines": 21
+        },
+        "reindex_lorebooks": {
+          "params": {
+            "rp_folder": "str",
+            "indexer": "LorebookIndexer"
+          },
+          "returns": "",
+          "is_async": true,
+          "docstring": "Re-index a per-RP lorebook folder + the global library from disk.",
+          "lines": 9
+        }
+      }
+    },
     "rp_engine/routers/npc.py": {
       "imports": {
         "internal": {
@@ -14529,7 +14690,7 @@
           "returns": "io.BytesIO",
           "is_async": true,
           "docstring": "Generate a ZIP archive containing all RP state and card files.",
-          "lines": 98
+          "lines": 108
         }
       }
     },
@@ -14547,7 +14708,8 @@
         "stdlib": [
           "asyncio",
           "logging",
-          "pathlib"
+          "pathlib",
+          "typing"
         ]
       },
       "classes": {
@@ -14558,7 +14720,9 @@
             "card_indexer": "CardIndexer",
             "vault_root": "Path",
             "rp_folders": "list[str]",
-            "debounce_ms": "int"
+            "debounce_ms": "int",
+            "lorebook_indexer": "Any",
+            "lorebook_global_path": "str | None"
           },
           "properties": {},
           "public_methods": {
@@ -14583,7 +14747,7 @@
               "is_async": true
             },
             "_get_watch_paths": {
-              "lines": 11,
+              "lines": 16,
               "is_async": false
             },
             "_find_rp_folder": {
@@ -14594,8 +14758,16 @@
               "lines": 29,
               "is_async": true
             },
+            "_lorebook_scope": {
+              "lines": 18,
+              "is_async": false
+            },
+            "_handle_lorebook_change": {
+              "lines": 30,
+              "is_async": true
+            },
             "_watch_loop": {
-              "lines": 57,
+              "lines": 70,
               "is_async": true
             }
           }
@@ -14820,7 +14992,7 @@
           "returns": "tuple[str, ImportStats]",
           "is_async": true,
           "docstring": "Import an RP from a ZIP archive.",
-          "lines": 79
+          "lines": 80
         }
       }
     },
@@ -20804,8 +20976,8 @@
       "diagnostic_logger",
       "card_indexer",
       "branch_mgr_early",
-      "file_watcher",
       "lorebook_indexer",
+      "file_watcher",
       "entity_extractor",
       "scene_classifier",
       "graph_resolver",
@@ -20884,7 +21056,8 @@
         "class": "FileWatcher",
         "tier": 0,
         "constructor_deps": [
-          "card_indexer"
+          "card_indexer",
+          "lorebook_indexer"
         ],
         "late_bound": {
           "diagnostic_logger": "diagnostic_logger"
@@ -20944,6 +21117,26 @@
           "graph_resolver",
           "card_indexer",
           "vault_root"
+        ],
+        "late_bound": {},
+        "optional": false
+      },
+      "lorebook_indexer": {
+        "class": "LorebookIndexer",
+        "tier": 0,
+        "constructor_deps": [
+          "db"
+        ],
+        "late_bound": {},
+        "optional": false
+      },
+      "lorebook_service": {
+        "class": "LorebookService",
+        "tier": 0,
+        "constructor_deps": [
+          "db",
+          "trigger_evaluator",
+          "guidelines_service"
         ],
         "late_bound": {},
         "optional": false
@@ -22024,6 +22217,46 @@
         "mode": "SearchMode"
       }
     },
+    "GET /api/lorebook": {
+      "router_file": "rp_engine/routers/lorebook.py",
+      "function": "list_lorebooks",
+      "depends": {
+        "vault_root": "Path",
+        "indexer": "LorebookIndexer",
+        "guidelines_svc": "GuidelinesService"
+      },
+      "request_body": null,
+      "response_model": "LorebookListResponse",
+      "query_params": {
+        "rp_folder": "str"
+      }
+    },
+    "PUT /api/lorebook/active": {
+      "router_file": "rp_engine/routers/lorebook.py",
+      "function": "set_active_set",
+      "depends": {
+        "vault_root": "Path",
+        "indexer": "LorebookIndexer",
+        "guidelines_svc": "GuidelinesService"
+      },
+      "request_body": "ActiveSetUpdate",
+      "response_model": "LorebookListResponse",
+      "query_params": {
+        "rp_folder": "str"
+      }
+    },
+    "POST /api/lorebook/reindex": {
+      "router_file": "rp_engine/routers/lorebook.py",
+      "function": "reindex_lorebooks",
+      "depends": {
+        "indexer": "LorebookIndexer"
+      },
+      "request_body": null,
+      "response_model": null,
+      "query_params": {
+        "rp_folder": "str"
+      }
+    },
     "POST /api/npc/react": {
       "router_file": "rp_engine/routers/npc.py",
       "function": "react",
@@ -22835,6 +23068,7 @@
           "rp_engine/routers/config.py",
           "rp_engine/routers/custom_state.py",
           "rp_engine/routers/diagnostics.py",
+          "rp_engine/routers/lorebook.py",
           "rp_engine/routers/npc.py",
           "rp_engine/routers/openai_compat.py",
           "rp_engine/services/analysis_pipeline.py",
@@ -23129,6 +23363,7 @@
           "rp_engine/dependencies.py",
           "rp_engine/routers/agent_chat.py",
           "rp_engine/routers/context.py",
+          "rp_engine/routers/lorebook.py",
           "rp_engine/routers/prompt.py",
           "rp_engine/routers/rp.py",
           "rp_engine/services/card_authoring.py",
@@ -23138,6 +23373,7 @@
         ],
         "endpoint_consumer": [
           "GET /api/context/guidelines",
+          "GET /api/lorebook",
           "GET /api/prompt/order",
           "GET /api/rp",
           "GET /api/rp/{name}",
@@ -23146,6 +23382,7 @@
           "POST /api/prompt/order/reset",
           "POST /api/rp/{name}/avatar",
           "PUT /api/context/guidelines",
+          "PUT /api/lorebook/active",
           "PUT /api/prompt/order"
         ]
       },
@@ -23160,12 +23397,20 @@
       },
       "LorebookIndexer": {
         "imported_by": [
-          "rp_engine/container.py"
+          "rp_engine/container.py",
+          "rp_engine/dependencies.py",
+          "rp_engine/routers/lorebook.py"
+        ],
+        "endpoint_consumer": [
+          "GET /api/lorebook",
+          "POST /api/lorebook/reindex",
+          "PUT /api/lorebook/active"
         ]
       },
       "LorebookService": {
         "imported_by": [
-          "rp_engine/container.py"
+          "rp_engine/container.py",
+          "rp_engine/dependencies.py"
         ]
       },
       "LLMClient": {
@@ -23439,6 +23684,11 @@
           "rp_engine/main.py"
         ]
       },
+      "lorebook": {
+        "imported_by": [
+          "rp_engine/main.py"
+        ]
+      },
       "npc": {
         "imported_by": [
           "rp_engine/main.py"
@@ -23521,6 +23771,7 @@
         "imported_by": [
           "rp_engine/migrate_cards.py",
           "rp_engine/routers/context.py",
+          "rp_engine/routers/lorebook.py",
           "rp_engine/routers/prompt.py",
           "rp_engine/routers/rp.py"
         ]
@@ -23858,6 +24109,7 @@
         "imported_by": [
           "rp_engine/routers/agent_chat.py",
           "rp_engine/routers/context.py",
+          "rp_engine/routers/lorebook.py",
           "rp_engine/routers/prompt.py",
           "rp_engine/routers/rp.py"
         ]
@@ -24271,6 +24523,7 @@
         "imported_by": [
           "rp_engine/routers/cards/crud.py",
           "rp_engine/routers/context.py",
+          "rp_engine/routers/lorebook.py",
           "rp_engine/routers/prompt.py",
           "rp_engine/routers/rp.py"
         ]
@@ -24513,6 +24766,7 @@
       "parse_file": {
         "imported_by": [
           "rp_engine/routers/context.py",
+          "rp_engine/routers/lorebook.py",
           "rp_engine/routers/prompt.py",
           "rp_engine/routers/rp.py",
           "rp_engine/services/export_service.py",
@@ -24740,6 +24994,11 @@
           "rp_engine/services/lorebook_service.py",
           "rp_engine/services/scene_classifier.py",
           "rp_engine/services/trigger_evaluator.py"
+        ]
+      },
+      "get_lorebook_indexer": {
+        "imported_by": [
+          "rp_engine/routers/lorebook.py"
         ]
       },
       "get_npc_engine": {
@@ -26278,6 +26537,19 @@
           "POST /api/diagnostics/report"
         ]
       },
+      "LorebookListResponse": {
+        "imported_by": [],
+        "used_by_endpoints": [
+          "GET /api/lorebook",
+          "PUT /api/lorebook/active"
+        ]
+      },
+      "ActiveSetUpdate": {
+        "imported_by": [],
+        "used_by_endpoints": [
+          "PUT /api/lorebook/active"
+        ]
+      },
       "list[NPCReaction]": {
         "imported_by": [],
         "used_by_endpoints": [
@@ -26572,6 +26844,12 @@
           "TriggerUpdate.conditions"
         ]
       },
+      "LorebookFile": {
+        "imported_by": [],
+        "field_of": [
+          "LorebookListResponse.files"
+        ]
+      },
       "Modifier": {
         "imported_by": [],
         "field_of": [
@@ -26668,6 +26946,7 @@
       "BaseModel": [
         "ActiveRPResponse",
         "ActiveRPToggle",
+        "ActiveSetUpdate",
         "AgentChatRequest",
         "AgentStatusResponse",
         "AnalysisConfig",
@@ -26794,6 +27073,8 @@
         "LocationFrontmatter",
         "LoreFrontmatter",
         "LorebookEntryHit",
+        "LorebookFile",
+        "LorebookListResponse",
         "ManifestEntryResponse",
         "ManifestListResponse",
         "ManifestResponse",
@@ -27085,6 +27366,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27116,6 +27398,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27147,6 +27430,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27178,6 +27462,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27209,6 +27494,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27237,6 +27523,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27267,6 +27554,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27411,6 +27699,7 @@
           "KnowledgeResolver",
           "LLMClient",
           "LanceStore",
+          "LorebookService",
           "NPCBriefBuilder",
           "NPCEngine",
           "NPCIntelligence",
@@ -27859,6 +28148,9 @@
       "DiagnosticUpdateRequest": "rp_engine/routers/diagnostics.py",
       "DiagnosticReportResponse": "rp_engine/routers/diagnostics.py",
       "DiagnosticClearResponse": "rp_engine/routers/diagnostics.py",
+      "LorebookFile": "rp_engine/routers/lorebook.py",
+      "LorebookListResponse": "rp_engine/routers/lorebook.py",
+      "ActiveSetUpdate": "rp_engine/routers/lorebook.py",
       "FeedbackBody": "rp_engine/routers/npc.py",
       "PromptOrderResponse": "rp_engine/routers/prompt.py",
       "PromptOrderUpdate": "rp_engine/routers/prompt.py",
@@ -28056,13 +28348,13 @@
         },
         {
           "file": "rp_engine/main.py",
-          "line": 204,
+          "line": 206,
           "receiver": "app",
           "caller": "health_check"
         },
         {
           "file": "rp_engine/main.py",
-          "line": 236,
+          "line": 238,
           "receiver": "response.headers",
           "caller": "_SPAStaticFiles.get_response"
         },
@@ -28917,6 +29209,12 @@
           "line": 313,
           "receiver": "router",
           "caller": "search_exchanges"
+        },
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 54,
+          "receiver": "router",
+          "caller": "list_lorebooks"
         },
         {
           "file": "rp_engine/routers/npc.py",
@@ -30522,61 +30820,61 @@
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 100,
+          "line": 110,
           "receiver": "frontmatter",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 114,
+          "line": 124,
           "receiver": "spec",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 142,
+          "line": 152,
           "receiver": "stats",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 143,
+          "line": 153,
           "receiver": "stats",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 145,
+          "line": 155,
           "receiver": "stats",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 146,
+          "line": 156,
           "receiver": "stats",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 147,
+          "line": 157,
           "receiver": "stats",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 148,
+          "line": 158,
           "receiver": "stats",
           "caller": "export_rp"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 165,
+          "line": 175,
           "receiver": "spec",
           "caller": "_export_table"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 166,
+          "line": 176,
           "receiver": "spec",
           "caller": "_export_table"
         },
@@ -30732,25 +31030,25 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 279,
+          "line": 303,
           "receiver": "row",
           "caller": "_import_state"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 279,
+          "line": 303,
           "receiver": "row",
           "caller": "_import_state"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 322,
+          "line": 346,
           "receiver": "row",
           "caller": "_remap_fk"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 324,
+          "line": 348,
           "receiver": "id_map",
           "caller": "_remap_fk"
         },
@@ -33068,13 +33366,13 @@
       "initialize": [
         {
           "file": "rp_engine/container.py",
-          "line": 104,
+          "line": 106,
           "receiver": "db",
           "caller": "ServiceContainer.build"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 199,
+          "line": 205,
           "receiver": "lance_store",
           "caller": "ServiceContainer.build"
         },
@@ -33088,7 +33386,7 @@
       "get_all_rp_folders": [
         {
           "file": "rp_engine/container.py",
-          "line": 111,
+          "line": 113,
           "receiver": "card_indexer",
           "caller": "ServiceContainer.build"
         },
@@ -33108,7 +33406,7 @@
       "full_index": [
         {
           "file": "rp_engine/container.py",
-          "line": 113,
+          "line": 115,
           "receiver": "card_indexer",
           "caller": "ServiceContainer.build"
         },
@@ -33134,7 +33432,7 @@
       "ensure_main_branch": [
         {
           "file": "rp_engine/container.py",
-          "line": 119,
+          "line": 121,
           "receiver": "branch_mgr_early",
           "caller": "ServiceContainer.build"
         },
@@ -33151,6 +33449,12 @@
           "line": 129,
           "receiver": "lorebook_indexer",
           "caller": "ServiceContainer.build"
+        },
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 113,
+          "receiver": "indexer",
+          "caller": "reindex_lorebooks"
         }
       ],
       "index_global": [
@@ -33159,15 +33463,15 @@
           "line": 130,
           "receiver": "lorebook_indexer",
           "caller": "ServiceContainer.build"
+        },
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 114,
+          "receiver": "indexer",
+          "caller": "reindex_lorebooks"
         }
       ],
       "fetch_one": [
-        {
-          "file": "rp_engine/container.py",
-          "line": 173,
-          "receiver": "db",
-          "caller": "ServiceContainer.build"
-        },
         {
           "file": "rp_engine/container.py",
           "line": 179,
@@ -33175,8 +33479,14 @@
           "caller": "ServiceContainer.build"
         },
         {
+          "file": "rp_engine/container.py",
+          "line": 185,
+          "receiver": "db",
+          "caller": "ServiceContainer.build"
+        },
+        {
           "file": "rp_engine/dependencies.py",
-          "line": 242,
+          "line": 252,
           "receiver": "db",
           "caller": "resolve_active_session"
         },
@@ -33910,7 +34220,7 @@
       "enqueue_write": [
         {
           "file": "rp_engine/container.py",
-          "line": 185,
+          "line": 191,
           "receiver": "db",
           "caller": "ServiceContainer.build"
         },
@@ -34348,7 +34658,7 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 333,
+          "line": 357,
           "receiver": "db",
           "caller": "_insert_row"
         },
@@ -34506,7 +34816,7 @@
       "reindex_all": [
         {
           "file": "rp_engine/container.py",
-          "line": 188,
+          "line": 194,
           "receiver": "vector_search",
           "caller": "ServiceContainer.build"
         }
@@ -34514,13 +34824,13 @@
       "configure": [
         {
           "file": "rp_engine/container.py",
-          "line": 288,
+          "line": 294,
           "receiver": "context_engine",
           "caller": "ServiceContainer.build"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 292,
+          "line": 298,
           "receiver": "custom_state_manager",
           "caller": "ServiceContainer.build"
         }
@@ -34528,7 +34838,7 @@
       "set_active": [
         {
           "file": "rp_engine/container.py",
-          "line": 333,
+          "line": 339,
           "receiver": "auto_save_manager",
           "caller": "ServiceContainer.build"
         },
@@ -34542,13 +34852,13 @@
       "start": [
         {
           "file": "rp_engine/container.py",
-          "line": 400,
+          "line": 408,
           "receiver": "self.file_watcher",
           "caller": "ServiceContainer.start"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 401,
+          "line": 409,
           "receiver": "self.analysis_pipeline",
           "caller": "ServiceContainer.start"
         },
@@ -34592,13 +34902,13 @@
       "stop": [
         {
           "file": "rp_engine/container.py",
-          "line": 406,
+          "line": 414,
           "receiver": "self.analysis_pipeline",
           "caller": "ServiceContainer.close"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 413,
+          "line": 421,
           "receiver": "self.file_watcher",
           "caller": "ServiceContainer.close"
         },
@@ -34612,7 +34922,7 @@
       "clear_all": [
         {
           "file": "rp_engine/container.py",
-          "line": 408,
+          "line": 416,
           "receiver": "self.auto_save_manager",
           "caller": "ServiceContainer.close"
         }
@@ -34620,7 +34930,7 @@
       "clear_cache": [
         {
           "file": "rp_engine/container.py",
-          "line": 409,
+          "line": 417,
           "receiver": "self.vector_search",
           "caller": "ServiceContainer.close"
         }
@@ -34628,7 +34938,7 @@
       "invalidate_alias_cache": [
         {
           "file": "rp_engine/container.py",
-          "line": 410,
+          "line": 418,
           "receiver": "self.response_analyzer",
           "caller": "ServiceContainer.close"
         },
@@ -34666,31 +34976,31 @@
         },
         {
           "file": "rp_engine/container.py",
-          "line": 411,
+          "line": 419,
           "receiver": "self.llm_client",
           "caller": "ServiceContainer.close"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 412,
+          "line": 420,
           "receiver": "self.lance_store",
           "caller": "ServiceContainer.close"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 415,
+          "line": 423,
           "receiver": "self.npc_intelligence",
           "caller": "ServiceContainer.close"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 417,
+          "line": 425,
           "receiver": "self.writing_intelligence",
           "caller": "ServiceContainer.close"
         },
         {
           "file": "rp_engine/container.py",
-          "line": 418,
+          "line": 426,
           "receiver": "self.db",
           "caller": "ServiceContainer.close"
         },
@@ -34829,6 +35139,12 @@
           "line": 215,
           "receiver": "router",
           "caller": "edit_exchange"
+        },
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 82,
+          "receiver": "router",
+          "caller": "set_active_set"
         },
         {
           "file": "rp_engine/routers/prompt.py",
@@ -35022,7 +35338,7 @@
         },
         {
           "file": "rp_engine/main.py",
-          "line": 213,
+          "line": 215,
           "receiver": "db",
           "caller": "health_check"
         },
@@ -35240,7 +35556,7 @@
         },
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 76,
+          "line": 84,
           "receiver": "self.diagnostic_logger",
           "caller": "FileWatcher._supervised_watch_loop"
         },
@@ -35312,7 +35628,7 @@
       "health": [
         {
           "file": "rp_engine/main.py",
-          "line": 208,
+          "line": 210,
           "receiver": "db",
           "caller": "health_check"
         }
@@ -35320,7 +35636,7 @@
       "get_response": [
         {
           "file": "rp_engine/main.py",
-          "line": 234,
+          "line": 236,
           "receiver": "super()",
           "caller": "_SPAStaticFiles.get_response"
         }
@@ -35886,13 +36202,13 @@
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 171,
+          "line": 181,
           "receiver": "db",
           "caller": "_export_table"
         },
         {
           "file": "rp_engine/services/export_service.py",
-          "line": 178,
+          "line": 188,
           "receiver": "db",
           "caller": "_export_table"
         },
@@ -36359,6 +36675,12 @@
           "caller": "get_guidelines"
         },
         {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 67,
+          "receiver": "guidelines_svc",
+          "caller": "list_lorebooks"
+        },
+        {
           "file": "rp_engine/routers/prompt.py",
           "line": 52,
           "receiver": "guidelines_svc",
@@ -36594,19 +36916,31 @@
         },
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 129,
+          "line": 142,
           "receiver": "self.card_indexer",
           "caller": "FileWatcher._handle_sidecar_change"
         },
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 139,
+          "line": 152,
           "receiver": "self.card_indexer",
           "caller": "FileWatcher._handle_sidecar_change"
         },
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 187,
+          "line": 190,
+          "receiver": "self.lorebook_indexer",
+          "caller": "FileWatcher._handle_lorebook_change"
+        },
+        {
+          "file": "rp_engine/services/file_watcher.py",
+          "line": 202,
+          "receiver": "self.lorebook_indexer",
+          "caller": "FileWatcher._handle_lorebook_change"
+        },
+        {
+          "file": "rp_engine/services/file_watcher.py",
+          "line": 263,
           "receiver": "self.card_indexer",
           "caller": "FileWatcher._watch_loop"
         },
@@ -36646,7 +36980,13 @@
         },
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 190,
+          "line": 199,
+          "receiver": "self.lorebook_indexer",
+          "caller": "FileWatcher._handle_lorebook_change"
+        },
+        {
+          "file": "rp_engine/services/file_watcher.py",
+          "line": 266,
           "receiver": "self.card_indexer",
           "caller": "FileWatcher._watch_loop"
         }
@@ -36796,7 +37136,7 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 329,
+          "line": 353,
           "receiver": "row",
           "caller": "_insert_row"
         },
@@ -36876,13 +37216,13 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 195,
+          "line": 219,
           "receiver": "row",
           "caller": "_import_table_batch"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 277,
+          "line": 301,
           "receiver": "row",
           "caller": "_import_state"
         },
@@ -37125,6 +37465,12 @@
           "line": 188,
           "receiver": "guidelines_svc",
           "caller": "update_guidelines"
+        },
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 101,
+          "receiver": "guidelines_svc",
+          "caller": "set_active_set"
         },
         {
           "file": "rp_engine/routers/prompt.py",
@@ -37463,6 +37809,46 @@
           "line": 747,
           "receiver": "self.ancestry_resolver",
           "caller": "PromptAssembler._history_where"
+        }
+      ],
+      "rp_lorebook_dir": [
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 71,
+          "receiver": "indexer",
+          "caller": "list_lorebooks"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 81,
+          "receiver": "self",
+          "caller": "LorebookIndexer.index_rp"
+        }
+      ],
+      "_discover": [
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 72,
+          "receiver": "LorebookIndexer",
+          "caller": "list_lorebooks"
+        },
+        {
+          "file": "rp_engine/routers/lorebook.py",
+          "line": 76,
+          "receiver": "LorebookIndexer",
+          "caller": "list_lorebooks"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 83,
+          "receiver": "self",
+          "caller": "LorebookIndexer.index_rp"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 93,
+          "receiver": "self",
+          "caller": "LorebookIndexer.index_global"
         }
       ],
       "get_reaction": [
@@ -39576,7 +39962,7 @@
       "_supervised_watch_loop": [
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 45,
+          "line": 53,
           "receiver": "self",
           "caller": "FileWatcher.start"
         }
@@ -39584,23 +39970,45 @@
       "_watch_loop": [
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 64,
+          "line": 72,
           "receiver": "self",
           "caller": "FileWatcher._supervised_watch_loop"
-        }
-      ],
-      "_get_watch_paths": [
-        {
-          "file": "rp_engine/services/file_watcher.py",
-          "line": 146,
-          "receiver": "self",
-          "caller": "FileWatcher._watch_loop"
         }
       ],
       "_find_rp_folder": [
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 174,
+          "line": 164,
+          "receiver": "self",
+          "caller": "FileWatcher._lorebook_scope"
+        },
+        {
+          "file": "rp_engine/services/file_watcher.py",
+          "line": 250,
+          "receiver": "self",
+          "caller": "FileWatcher._watch_loop"
+        }
+      ],
+      "_get_watch_paths": [
+        {
+          "file": "rp_engine/services/file_watcher.py",
+          "line": 209,
+          "receiver": "self",
+          "caller": "FileWatcher._watch_loop"
+        }
+      ],
+      "_lorebook_scope": [
+        {
+          "file": "rp_engine/services/file_watcher.py",
+          "line": 232,
+          "receiver": "self",
+          "caller": "FileWatcher._watch_loop"
+        }
+      ],
+      "_handle_lorebook_change": [
+        {
+          "file": "rp_engine/services/file_watcher.py",
+          "line": 235,
           "receiver": "self",
           "caller": "FileWatcher._watch_loop"
         }
@@ -39608,7 +40016,7 @@
       "_handle_sidecar_change": [
         {
           "file": "rp_engine/services/file_watcher.py",
-          "line": 180,
+          "line": 256,
           "receiver": "self",
           "caller": "FileWatcher._watch_loop"
         }
@@ -39741,28 +40149,6 @@
           "line": 131,
           "receiver": "self",
           "caller": "OpenRouterProvider.embed"
-        }
-      ],
-      "rp_lorebook_dir": [
-        {
-          "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 81,
-          "receiver": "self",
-          "caller": "LorebookIndexer.index_rp"
-        }
-      ],
-      "_discover": [
-        {
-          "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 83,
-          "receiver": "self",
-          "caller": "LorebookIndexer.index_rp"
-        },
-        {
-          "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 93,
-          "receiver": "self",
-          "caller": "LorebookIndexer.index_global"
         }
       ],
       "_parse_file": [

@@ -67,6 +67,8 @@ class ServiceContainer:
     vector_search: VectorSearch
     trigger_evaluator: TriggerEvaluator
     knowledge_resolver: KnowledgeResolver
+    lorebook_indexer: LorebookIndexer
+    lorebook_service: LorebookService
     context_engine: ContextEngine
     llm_client: LLMClient
     npc_engine: NPCEngine
@@ -118,8 +120,6 @@ class ServiceContainer:
         for folder in rp_folders:
             await branch_mgr_early.ensure_main_branch(folder)
 
-        file_watcher = FileWatcher(card_indexer, vault_root, rp_folders)
-
         # Lorebook (Phase 5b) — file-drop library indexed into lorebook_entries
         # (cache). Per-RP Lorebooks/ folders + a global-library path. Source of
         # truth is the files; this is an index rebuilt at startup / on change.
@@ -130,6 +130,12 @@ class ServiceContainer:
         lb_total += await lorebook_indexer.index_global(config.context.lorebook_global_path)
         if lb_total:
             logger.info("Indexed %d lorebook entries", lb_total)
+
+        file_watcher = FileWatcher(
+            card_indexer, vault_root, rp_folders,
+            lorebook_indexer=lorebook_indexer,
+            lorebook_global_path=config.context.lorebook_global_path,
+        )
 
         entity_extractor = EntityExtractor(db)
         scene_classifier = SceneClassifier(db)
@@ -367,6 +373,8 @@ class ServiceContainer:
             vector_search=vector_search,
             trigger_evaluator=trigger_evaluator,
             knowledge_resolver=knowledge_resolver,
+            lorebook_indexer=lorebook_indexer,
+            lorebook_service=lorebook_service,
             context_engine=context_engine,
             llm_client=llm_client,
             npc_engine=npc_engine,

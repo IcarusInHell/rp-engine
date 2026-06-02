@@ -31,6 +31,8 @@ from rp_engine.services.graph_resolver import GraphResolver
 from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.services.knowledge_resolver import KnowledgeResolver
 from rp_engine.services.llm_client import LLMClient
+from rp_engine.services.lorebook_indexer import LorebookIndexer
+from rp_engine.services.lorebook_service import LorebookService
 from rp_engine.services.npc_brief_builder import NPCBriefBuilder
 from rp_engine.services.npc_engine import NPCEngine
 from rp_engine.services.prompt_assembler import PromptAssembler
@@ -102,6 +104,14 @@ def get_context_engine(request: Request) -> ContextEngine:
 
 def get_knowledge_resolver(request: Request) -> KnowledgeResolver:
     return _get(request, "knowledge_resolver")
+
+
+def get_lorebook_indexer(request: Request) -> LorebookIndexer:
+    return _get(request, "lorebook_indexer")
+
+
+def get_lorebook_service(request: Request) -> LorebookService:
+    return _get(request, "lorebook_service")
 
 
 def get_llm_client(request: Request) -> LLMClient:

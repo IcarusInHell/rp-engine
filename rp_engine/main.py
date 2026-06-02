@@ -160,6 +160,7 @@ from rp_engine.routers import (  # noqa: E402
     custom_state,
     diagnostics,
     exchanges,
+    lorebook,
     npc,
     openai_compat,
     prompt,
@@ -183,6 +184,7 @@ app.include_router(annotations.top_router)
 app.include_router(rp.router)
 app.include_router(context.router)
 app.include_router(prompt.router)
+app.include_router(lorebook.router)
 app.include_router(triggers.router)
 app.include_router(npc.router)
 app.include_router(state.router)
