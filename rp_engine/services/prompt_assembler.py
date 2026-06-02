@@ -678,12 +678,11 @@ class PromptAssembler:
 
         # World Info (lorebook hits — structural sibling of Triggered Notes).
         # Non-empty guarded so a lorebook-less RP keeps a byte-identical prompt.
-        # Section-level injection depth is wired (``world_info`` is in the default
-        # injection depths map at 2, beside ``triggered_notes``). Per-entry depth
-        # (``LorebookEntryHit.depth``, from ST position/depth) is parsed/stored/
-        # surfaced but NOT yet split into per-entry injection points — the whole
-        # section injects as one block at the section depth. Per-entry depth
-        # splitting is a documented deferral (forward-compat seam).
+        # This renders ONE flat block — used by the legacy/injection-disabled path
+        # and the static-preview endpoints. When injection is enabled,
+        # ``build_messages`` instead distributes entries per-entry by depth (ST
+        # position/depth, fallback to the section ``world_info`` depth) and skips
+        # this name in its section loop.
         if context_response.lorebook_entries:
             items = ["\n\n# World Info\n"]
             for hit in context_response.lorebook_entries:
@@ -1001,10 +1000,29 @@ class PromptAssembler:
         if prompt_cfg.injection.enabled and context_response is not None:
             depths = self._effective_injection_depths(rp_folder)
             for name, content in self._build_dynamic_sections(context_response):
+                if name == "world_info":
+                    continue  # lorebook depth is handled per-entry below
                 depth = depths.get(name, 0)
                 if depth > 0:
                     inject_names.add(name)
                     depth_content.setdefault(depth, []).append(content)
+
+            # World Info honors PER-ENTRY depth (ST position/depth), falling back
+            # to the section-level ``world_info`` depth. Entries are grouped by
+            # effective depth so each depth slot gets one ``# World Info`` block.
+            # When the section depth is 0 the section stays in the top system
+            # message (handled by build_system_prompt — world_info NOT excluded).
+            section_depth = depths.get("world_info", 0)
+            if context_response.lorebook_entries and section_depth > 0:
+                inject_names.add("world_info")
+                by_depth: dict[int, list[str]] = {}
+                for hit in context_response.lorebook_entries:
+                    d = hit.depth if (hit.depth and hit.depth > 0) else section_depth
+                    by_depth.setdefault(d, []).append(hit.content)
+                for d, contents in by_depth.items():
+                    depth_content.setdefault(d, []).append(
+                        "\n\n# World Info\n\n" + "\n".join(contents)
+                    )
 
         # --- Phase 5a: narrator's note (session-persistent GM steering) ---
         # Injected at its own depth independent of the global injection toggle —

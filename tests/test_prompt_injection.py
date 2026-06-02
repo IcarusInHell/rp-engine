@@ -31,6 +31,7 @@ from rp_engine.models.context import (
     ContextDocument,
     ContextResponse,
     CustomStateBlock,
+    LorebookEntryHit,
     NPCBrief,
     PastExchangeHit,
     ResolvedKnowledge,
@@ -288,6 +289,38 @@ async def test_injection_enabled_moves_sections_to_depth(seeded_rp):
     assert scene_pos[0] < trig_pos[0], "depth ordering wrong: scene(4) should precede triggered(2)"
     # Both are in-history system messages (after the top system message).
     assert scene_pos[0] > 0 and trig_pos[0] > 0
+
+
+async def test_world_info_honors_per_entry_depth(seeded_rp):
+    """With injection on, lorebook entries distribute by PER-ENTRY depth (ST
+    position/depth), falling back to the section ``world_info`` depth (2). An
+    entry at depth 4 injects further up than one at the default depth 2.
+
+    Mutation guard: if build_messages routed World Info as one flat block at the
+    section depth (ignoring hit.depth), both entries would share a position and
+    the strict ordering below would fail."""
+    container = seeded_rp.container
+    cfg = PromptConfig(
+        injection=InjectionConfig(enabled=True),
+        example_dialogue=ExampleDialogueConfig(enabled=False),
+    )
+    cr = ContextResponse(
+        current_exchange=4,
+        lorebook_entries=[
+            LorebookEntryHit(entry_id=1, name="deep", content="WI_DEEP_ENTRY", scope="rp", depth=4),
+            LorebookEntryHit(entry_id=2, name="shallow", content="WI_SHALLOW_ENTRY", scope="rp"),  # no depth → section 2
+        ],
+    )
+    messages = await _assembler_with(container, cfg).build_messages(
+        seeded_rp.rp_folder, "main", "now", context_response=cr, session_id=None,
+    )
+    assert "WI_DEEP_ENTRY" not in messages[0]["content"], "world_info left the system msg"
+    deep = _positions(messages, "WI_DEEP_ENTRY")
+    shallow = _positions(messages, "WI_SHALLOW_ENTRY")
+    assert deep and shallow, "both entries injected into history"
+    assert deep[0] != shallow[0], "per-entry depth split them to different slots"
+    # depth 4 sits further up (earlier index) than the depth-2 fallback.
+    assert deep[0] < shallow[0], "depth-4 entry should precede the depth-2 entry"
 
 
 async def test_injection_depth_frontmatter_override_merges(seeded_rp, monkeypatch):
