@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "generated_at": "2026-06-02T12:17:36.261672+00:00",
+    "generated_at": "2026-06-02T12:21:51.582881+00:00",
     "generator_version": "1.1.0",
     "files_parsed": 159,
     "packages": [
@@ -9,7 +9,7 @@
       "writing_intelligence",
       "pattern_intelligence"
     ],
-    "parse_time_ms": 1436
+    "parse_time_ms": 1743
   },
   "files": {
     "rp_engine/__init__.py": {
@@ -15600,7 +15600,8 @@
           "datetime",
           "json",
           "logging",
-          "pathlib"
+          "pathlib",
+          "re"
         ]
       },
       "classes": {
@@ -15725,11 +15726,31 @@
               "is_async": false
             },
             "_parse_structured_doc": {
-              "lines": 3,
+              "lines": 73,
+              "is_async": false
+            },
+            "_load_routing_sidecar": {
+              "lines": 11,
+              "is_async": false
+            },
+            "_file_keys": {
+              "lines": 9,
+              "is_async": false
+            },
+            "_get_path": {
+              "lines": 9,
+              "is_async": false
+            },
+            "_derive_summary": {
+              "lines": 10,
+              "is_async": false
+            },
+            "_render_subtree": {
+              "lines": 21,
               "is_async": false
             },
             "_parse_markdown": {
-              "lines": 3,
+              "lines": 25,
               "is_async": false
             }
           }
@@ -31089,49 +31110,31 @@
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 177,
+          "line": 178,
           "receiver": "data",
           "caller": "LorebookIndexer._parse_st_world_info"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 189,
+          "line": 190,
           "receiver": "e",
           "caller": "LorebookIndexer._parse_st_world_info"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 192,
+          "line": 193,
           "receiver": "e",
           "caller": "LorebookIndexer._parse_st_world_info"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 192,
+          "line": 193,
           "receiver": "e",
           "caller": "LorebookIndexer._parse_st_world_info"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 194,
-          "receiver": "e",
-          "caller": "LorebookIndexer._parse_st_world_info"
-        },
-        {
-          "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 199,
-          "receiver": "e",
-          "caller": "LorebookIndexer._parse_st_world_info"
-        },
-        {
-          "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 199,
-          "receiver": "e",
-          "caller": "LorebookIndexer._parse_st_world_info"
-        },
-        {
-          "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 200,
+          "line": 195,
           "receiver": "e",
           "caller": "LorebookIndexer._parse_st_world_info"
         },
@@ -31161,6 +31164,12 @@
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 201,
+          "receiver": "e",
+          "caller": "LorebookIndexer._parse_st_world_info"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
           "line": 202,
           "receiver": "e",
           "caller": "LorebookIndexer._parse_st_world_info"
@@ -31170,6 +31179,78 @@
           "line": 202,
           "receiver": "e",
           "caller": "LorebookIndexer._parse_st_world_info"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 203,
+          "receiver": "e",
+          "caller": "LorebookIndexer._parse_st_world_info"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 203,
+          "receiver": "e",
+          "caller": "LorebookIndexer._parse_st_world_info"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 244,
+          "receiver": "routing",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 249,
+          "receiver": "routing",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 257,
+          "receiver": "routing",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 265,
+          "receiver": "rule",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 274,
+          "receiver": "rule",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 275,
+          "receiver": "rule",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 276,
+          "receiver": "rule",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 276,
+          "receiver": "rule",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 281,
+          "receiver": "routing",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 313,
+          "receiver": "data",
+          "caller": "LorebookIndexer._file_keys"
         },
         {
           "file": "rp_engine/services/lorebook_service.py",
@@ -34273,19 +34354,19 @@
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 129,
+          "line": 130,
           "receiver": "self.db",
           "caller": "LorebookIndexer.index_file"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 136,
+          "line": 137,
           "receiver": "self.db",
           "caller": "LorebookIndexer.index_file"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 156,
+          "line": 157,
           "receiver": "self.db",
           "caller": "LorebookIndexer.remove_file"
         },
@@ -35841,7 +35922,7 @@
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 113,
+          "line": 114,
           "receiver": "self.db",
           "caller": "LorebookIndexer.index_file"
         },
@@ -36537,13 +36618,13 @@
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 83,
+          "line": 84,
           "receiver": "self",
           "caller": "LorebookIndexer.index_rp"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 93,
+          "line": 94,
           "receiver": "self",
           "caller": "LorebookIndexer.index_global"
         }
@@ -39665,7 +39746,7 @@
       "rp_lorebook_dir": [
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 80,
+          "line": 81,
           "receiver": "self",
           "caller": "LorebookIndexer.index_rp"
         }
@@ -39673,13 +39754,13 @@
       "_discover": [
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 82,
+          "line": 83,
           "receiver": "self",
           "caller": "LorebookIndexer.index_rp"
         },
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 92,
+          "line": 93,
           "receiver": "self",
           "caller": "LorebookIndexer.index_global"
         }
@@ -39687,7 +39768,7 @@
       "_parse_file": [
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 123,
+          "line": 124,
           "receiver": "self",
           "caller": "LorebookIndexer.index_file"
         }
@@ -39695,7 +39776,7 @@
       "_parse_st_world_info": [
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 168,
+          "line": 169,
           "receiver": "self",
           "caller": "LorebookIndexer._parse_file"
         }
@@ -39703,7 +39784,7 @@
       "_parse_structured_doc": [
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 170,
+          "line": 171,
           "receiver": "self",
           "caller": "LorebookIndexer._parse_file"
         }
@@ -39711,9 +39792,73 @@
       "_parse_markdown": [
         {
           "file": "rp_engine/services/lorebook_indexer.py",
-          "line": 172,
+          "line": 173,
           "receiver": "self",
           "caller": "LorebookIndexer._parse_file"
+        }
+      ],
+      "_load_routing_sidecar": [
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 243,
+          "receiver": "self",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        }
+      ],
+      "_file_keys": [
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 244,
+          "receiver": "self",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        }
+      ],
+      "_derive_summary": [
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 249,
+          "receiver": "self",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        }
+      ],
+      "_get_path": [
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 261,
+          "receiver": "self",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 334,
+          "receiver": "self",
+          "caller": "LorebookIndexer._derive_summary"
+        }
+      ],
+      "_render_subtree": [
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 269,
+          "receiver": "self",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 292,
+          "receiver": "self",
+          "caller": "LorebookIndexer._parse_structured_doc"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 350,
+          "receiver": "self",
+          "caller": "LorebookIndexer._render_subtree"
+        },
+        {
+          "file": "rp_engine/services/lorebook_indexer.py",
+          "line": 356,
+          "receiver": "self",
+          "caller": "LorebookIndexer._render_subtree"
         }
       ],
       "_load_entries": [

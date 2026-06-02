@@ -1,0 +1,129 @@
+{
+  "name": "Dwarf",
+
+  "mechanical": {
+    "size": "Medium",
+    "speed": 25,
+    "speed_note": "Speed is not reduced by wearing heavy armor",
+    "lifespan": "Mature at human rates but considered young until age 50. Average lifespan around 350 years, with some living past 400",
+    "ability_bonuses": {
+      "con": 2
+    },
+    "languages": ["Common", "Dwarvish"],
+    "resistances": ["poison"],
+    "darkvision": 60,
+    "other_traits": [
+      "Dwarven Resilience: Advantage on saving throws against poison, resistance to poison damage",
+      "Stonecunning: Double proficiency bonus on Intelligence (History) checks related to the origin of stonework",
+      "Dwarven Combat Training: Proficiency with battleaxe, handaxe, light hammer, and warhammer",
+      "Tool Proficiency: Proficiency with one of smith's tools, brewer's supplies, or mason's tools"
+    ]
+  },
+
+  "physical": {
+    "build": "Broad and compact, 4'0\"-5'0\", 130-200 lbs. Dense muscle and heavy bone. Dwarves are significantly heavier than their height suggests — a 4'6\" dwarf may outweigh a 6' human. Wide shoulders, thick limbs, low center of gravity",
+    "distinguishing_features": [
+      "Beard — the defining feature. Both male and female dwarves grow facial hair, though female beards are typically finer and sometimes kept shorter. Beards grow throughout life and are never fully shaved in most cultures",
+      "Heavy brow ridge — prominent and expressive, often shadowing deep-set eyes",
+      "Broad hands with thick fingers — built for grip and force, surprisingly dexterous for fine craft work",
+      "Stocky proportions — shorter legs relative to torso length compared to humans, contributing to lower speed but exceptional stability"
+    ],
+    "skin_tones": [
+      "Earth tones predominate — deep tan, brown, ruddy, weathered bronze",
+      "Paler complexions in deep-dwelling clans who rarely see sunlight",
+      "Duergar: ashen gray to dark charcoal"
+    ],
+    "eye_colors": ["brown", "hazel", "amber", "gray", "steel blue", "black", "deep green"],
+    "hair": "Thick and coarse. Colors range from black, brown, and auburn to deep red. Grays with age — silver and white beards are marks of great age and command respect. Hair grows slowly but continuously. Some dwarves have hair so coarse it borders on wire-like",
+    "expressiveness": {
+      "beard": "The primary expressive feature in dwarven communication. Stroking the beard signals thought or consideration. Bristling or puffing the beard indicates anger or offense — other dwarves read this immediately. A still, well-kept beard reads as composure and control. Tugging one's own beard is frustration or impatience. Presenting the beard (chin raised, beard forward) is a display of pride or authority. A dwarf whose beard is unkempt without reason is assumed to be in distress — the beard reflects the state of the person",
+      "brow": "The heavy brow ridge allows for pronounced furrowing and lifting. A deeply furrowed brow is unmistakable displeasure. Raised brows (which pull the brow ridge up noticeably) signal surprise or interest. The brow and beard together create a highly readable face despite the lower half being covered — dwarves are better at reading each other through these features than most other races realize",
+      "stance": "Dwarves communicate heavily through posture and ground contact. Feet planted wide is a default confident stance. Leaning forward signals engagement or aggression. Crossing arms over the chest (common in many races) reads as guarded in dwarves but also as evaluation — they are assessing you. Shifting weight from foot to foot is unusual and signals discomfort, as dwarves naturally plant and stay planted",
+      "hands": "Dwarves gesture less than humans when speaking but their hand positions carry weight. Hands on a tool or weapon hilt is a comfort posture, not a threat. Open palms shown deliberately signals good faith. Clenched fists at the sides (not raised) indicate controlled anger — a dwarf holding back"
+    },
+    "aging": {
+      "child": "Proportionally similar to adult build from early age — dwarven children are stocky and dense from the start. First facial hair appears around age 10-15, much earlier than human expectations. Voice deepens early",
+      "adolescent": "Beard comes in fully during this stage (ages 15-40). Physical strength builds steadily. Apprenticeships typically begin during this period. Considered young and impulsive by dwarven standards even as they approach physical maturity",
+      "adult": "Fully mature around age 50. Beard reaches working length. Physical peak lasts an extraordinarily long time — a dwarf of 200 is no less capable than one of 60. Skills deepen through centuries of practice. The distinction between a young adult and a seasoned one is in craft and bearing, not physical ability",
+      "elder": "Beyond 300 years. Beard has gone fully silver or white. Brow ridges deepen. Movement slows but strength fades only in the final decades. An elder dwarf's opinions carry enormous weight — they have outlived most problems anyone can name. Some dwarves maintain full vigor until very near the end, declining rapidly rather than gradually"
+    },
+    "biological_notes": {
+      "sleep": "Normal sleep, roughly 8 hours. Dwarves can adapt to unusual schedules easily — generations underground have eliminated any dependence on sunlight for sleep cycles",
+      "diet": "Hearty and calorie-dense. Meat, root vegetables, mushrooms, bread, cheese, and ale are staples. Dwarves have robust digestive systems — their poison resistance extends to a general tolerance for things that would sicken other races. They can eat heavily preserved, fermented, or aged foods that others would consider spoiled",
+      "environment": "Naturally comfortable underground. No claustrophobia — enclosed spaces feel secure, not threatening. Excellent spatial awareness in three dimensions (up/down as natural as left/right). Can function in very low light. Mildly uncomfortable in wide open spaces with no ceiling, though this is cultural more than biological — surface-dwelling dwarves adapt within a generation"
+    }
+  },
+
+  "social": {
+    "general_perception": "Respected by most races as reliable, honest, and skilled — but also seen as stubborn, humorless, and slow to change. Dwarves are welcomed as trading partners, crafters, and allies in most settlements. Their reputation for keeping oaths and producing quality goods precedes them. The negative stereotypes — greed, grudge-holding, clannishness, drinking — are widespread but rarely prevent cooperation",
+    "notable_relationships": {
+      "elves": "The oldest and most complicated inter-racial relationship. Mutual respect for craftsmanship (stone vs wood/magic) but fundamental disagreements about time, patience, and priorities. Dwarves find elves frivolous and indecisive. Elves find dwarves rigid and materialistic. Old alliances exist alongside old grudges, sometimes within the same generation",
+      "gnomes": "Generally warm. Gnomes share the dwarven love of craft and engineering, though gnomish invention is more experimental and less traditional. Dwarves appreciate gnomish ingenuity while being mildly exasperated by gnomish chaos. The closest thing dwarves have to an easy friendship with another race",
+      "halflings": "Friendly but not deep. Dwarves respect halfling practicality and cooking. Halflings appreciate dwarven reliability. Neither race fully understands the other's priorities but there is little friction",
+      "orcs_and_goblinoids": "Deep ancestral enmity. Generations of territorial warfare over mountain holds and underground resources. This hatred runs deeper than politics — it is woven into dwarven identity, history, and architecture. Fortifications are built with orc sieges in mind. Songs remember fallen holds",
+      "humans": "Productive but impatient relationship. Dwarves find human lifespans tragically short and their ambitions recklessly fast. Humans find dwarves maddeningly slow to act. Despite this, human-dwarf trade is extensive and human cities often have dwarven quarters where smiths and masons settle"
+    },
+    "homeland": "Mountain holds and underground citadels carved from living rock over centuries. Major holds are engineering marvels — vast underground cities with forges, breweries, temples, residential halls, and defensive networks. Some dwarven settlements exist on the surface, particularly those established for trade, but the cultural heart is always underground",
+    "common_occupations": ["smith", "mason", "miner", "brewer", "soldier", "merchant", "jeweler", "engineer", "cleric", "runekeeper"],
+    "deities": ["Moradin (The All-Hammer, creator god, patron of smiths)", "Clangeddin Silverbeard (god of war and valor)", "Berronar Truesilver (goddess of hearth, home, and marriage)", "Dumathoin (Keeper of Secrets Under the Mountain, god of mining and buried wealth)", "Abbathor (god of greed — acknowledged but not openly worshipped)"],
+    "societal_notes": "Dwarven society is organized around the hold — a mountain citadel that is home, fortress, and family estate all at once. A hold is not a collection of families who happen to live together. It is one family, branched and extended over centuries, that grew large enough to fill a mountain. Clans within the hold trace back to common ancestors, and even rival clans acknowledge shared blood. A dwarf introduces themselves with their clan name as readily as their given name, and often before it. Clans maintain detailed genealogies going back centuries — written records track lineage and facts with meticulous precision. But whether a dwarf MATTERED is not written down. That lives in the oral tradition: songs, toasts, and warnings passed from generation to generation. Oral history compresses everything to extremes — you are either a legend or a cautionary tale, and most dwarves are neither, which means most dwarves are forgotten. This binary creates a culture where everything feels like a competition. You are either the best or you are nothing. Honor and reputation attach to the clan as much as the individual: one dwarf's shame reflects on all their kin, and one dwarf's achievement elevates the whole family",
+    "cross_cultural_traditions": {
+      "the_lasting_work": "Every dwarf is expected to create one defining masterpiece in their lifetime — a single work that proves they existed. A forged blade, a carved hall, a legendary brew, a bridge that holds for centuries. The Lasting Work is declared once and stands or falls on its own. If it breaks, is lost, or is surpassed, that is the maker's failure. The pressure to get it right is immense, and some dwarves spend decades before they feel ready to declare theirs. A dwarf who dies without a Lasting Work is pitied. A dwarf whose Lasting Work endures is immortal in the only way that matters — the work speaks when the maker cannot. Across all dwarven cultures, the concept is universal, though how it is judged and by whom varies.",
+      "the_reckoning": "At a dwarf's death — and sometimes before, in rare formal circumstances — the community speaks the dead dwarf's deeds aloud. This is the Reckoning. Every achievement, every failure, every contribution is named by those who witnessed it. The Lasting Work, if one exists, is displayed. If the deeds fill the hall with voices, the dwarf is remembered. If silence falls — if no one has anything to say — that silence IS the judgment. There is no worse fate in dwarven culture than a quiet Reckoning. The specifics of how the Reckoning is conducted vary by culture, but the core is the same everywhere: your life is measured by what others can say about it when you are gone."
+    }
+  },
+
+  "origin": "Dwarves believe they were carved from the stone of the mountains by Moradin himself, shaped on his great forge and given life with the breath of the earth. Whether this is literal truth or sacred metaphor varies by clan and theologian, but the connection between dwarves and stone is fundamental to their identity — they are of the mountain, not merely in it. Some scholars of other races theorize that dwarves were among the first mortal races, predating humans by millennia, which would account for the depth of their underground civilizations",
+
+  "default_culture": "dwarf-hold",
+  "common_cultures": ["dwarf-hold", "dwarf-hearthless", "dwarf-clanless"],
+
+  "subraces": {
+    "hill": {
+      "name": "Hill Dwarf",
+      "description": "Hill dwarves are the most commonly encountered subrace, often living in settlements closer to the surface or in rolling hill country rather than deep mountain holds. They are known for their keen senses, deep intuition, and remarkable toughness",
+      "ability_bonuses": {
+        "con": 2,
+        "wis": 1
+      },
+      "other_traits": [
+        "Dwarven Toughness: Hit point maximum increases by 1, and by 1 again every time you gain a level"
+      ],
+      "physical_notes": "Slightly leaner than mountain dwarves on average, though still broad and solid by any other race's standards. Skin tones tend warmer — more ruddy and tanned from surface exposure"
+    },
+    "mountain": {
+      "name": "Mountain Dwarf",
+      "description": "Mountain dwarves are the deep dwellers, the hold-builders, the keepers of the great underground citadels. Stronger and more martially trained than their hill cousins, they are raised in a society where every citizen is expected to defend the hold",
+      "ability_bonuses": {
+        "con": 2,
+        "str": 2
+      },
+      "other_traits": [
+        "Dwarven Armor Training: Proficiency with light and medium armor"
+      ],
+      "physical_notes": "Broader and more heavily muscled than hill dwarves. Paler skin from generations underground. Hair and beards tend darker — black and deep brown predominate. Hands are often calloused and scarred from forge work and mining"
+    },
+    "duergar": {
+      "name": "Duergar (Gray Dwarf)",
+      "description": "Duergar are the descendants of dwarves enslaved by mind flayers in the deep Underdark. Centuries of captivity, psychic exposure, and adaptation to the deepest darkness transformed them into something distinct — grim, paranoid, ruthlessly pragmatic, and possessed of psionic abilities their surface kin lack. They won their freedom through rebellion but the scars of enslavement shaped their entire culture",
+      "ability_bonuses": {
+        "con": 2,
+        "str": 1
+      },
+      "darkvision": 120,
+      "innate_spellcasting": {
+        "ability": "n/a (psionic)",
+        "level_3": ["Enlarge/Reduce (self only, enlarge only, 1/day)"],
+        "level_5": ["Invisibility (self only, 1/day)"]
+      },
+      "other_traits": [
+        "Superior Darkvision: 120 feet",
+        "Sunlight Sensitivity: Disadvantage on attack rolls and Wisdom (Perception) checks that rely on sight when in direct sunlight",
+        "Duergar Resilience: Advantage on saving throws against illusions and against being charmed or paralyzed"
+      ],
+      "resistances": ["poison"],
+      "physical_notes": "Ashen gray skin, sometimes with a faint bluish or purplish undertone. Hair is white, pale gray, or absent entirely — many duergar are bald. Eyes are dull and often appear flat or lifeless to other races. Beards are typically kept shorter and more utilitarian than surface dwarves — ornamentation is rare. Generally thinner and more gaunt than surface dwarves, with a wiry strength rather than the broad bulk of their cousins",
+      "expressiveness_notes": "Duergar are significantly less expressive than surface dwarves. Centuries of enslavement under telepathic masters bred a culture of emotional suppression — showing feelings was dangerous when your captors could read your mind. Modern duergar maintain this reserve. Their faces are difficult to read, their beards are kept short enough to minimize tells, and their body language is controlled and minimal. Other dwarves find them unsettling. Other races often cannot read them at all"
+    }
+  }
+}
