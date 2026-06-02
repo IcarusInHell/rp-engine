@@ -678,6 +678,12 @@ class PromptAssembler:
 
         # World Info (lorebook hits — structural sibling of Triggered Notes).
         # Non-empty guarded so a lorebook-less RP keeps a byte-identical prompt.
+        # Section-level injection depth is wired (``world_info`` is in the default
+        # injection depths map at 2, beside ``triggered_notes``). Per-entry depth
+        # (``LorebookEntryHit.depth``, from ST position/depth) is parsed/stored/
+        # surfaced but NOT yet split into per-entry injection points — the whole
+        # section injects as one block at the section depth. Per-entry depth
+        # splitting is a documented deferral (forward-compat seam).
         if context_response.lorebook_entries:
             items = ["\n\n# World Info\n"]
             for hit in context_response.lorebook_entries:

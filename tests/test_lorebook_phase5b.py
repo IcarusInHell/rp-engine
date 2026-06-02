@@ -166,6 +166,30 @@ async def test_export_import_bundles_lorebook_files(db, tmp_path):
     assert (dest / folder / "Lorebooks" / ".meta" / "book.lorebook.json").exists()
 
 
+async def test_empty_lorebooks_list_means_none_active(db, tmp_path, monkeypatch):
+    """An EXPLICIT ``lorebooks: []`` disables per-RP lorebooks (distinct from
+    absent → all active). Confirms the empty-means-none semantics."""
+    ctx = ContextConfig()
+    ctx.lorebook_enabled = True
+    cfg = SimpleNamespace(context=ctx, prompt=SimpleNamespace(trigger_stemming=False))
+    monkeypatch.setattr("rp_engine.services.lorebook_service.get_config", lambda: cfg)
+    monkeypatch.setattr("rp_engine.services.trigger_evaluator.get_config", lambda: cfg)
+
+    lb = tmp_path / "rp1" / "Lorebooks"
+    lb.mkdir(parents=True)
+    (lb / "book.json").write_text(json.dumps({"name": "b", "entries": {"0": {"keys": ["dragon"], "content": "C"}}}))
+    gl = tmp_path / "rp1" / "RP State" / "Story_Guidelines.md"
+    gl.parent.mkdir(parents=True)
+    gl.write_text("---\nlorebooks: []\n---\nBody.\n", encoding="utf-8")
+
+    idx = LorebookIndexer(db, tmp_path)
+    await idx.index_rp("rp1")
+    svc = LorebookService(db, TriggerEvaluator(db), GuidelinesService(tmp_path))
+
+    hits = await svc.get_active_hits("rp1", "main", "a dragon roared", {})
+    assert hits == [], "explicit lorebooks: [] → no per-RP files active"
+
+
 # ---------------------------------------------------------------------------
 # Documented deviation: lorebook keyword matching is SUBSTRING (evaluator reuse),
 # NOT word-boundary. The plan's verification asked for word-boundary, but the

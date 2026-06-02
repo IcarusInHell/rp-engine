@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "generated_at": "2026-06-02T12:38:18.029369+00:00",
+    "generated_at": "2026-06-02T12:47:13.558579+00:00",
     "generator_version": "1.1.0",
     "files_parsed": 160,
     "packages": [
@@ -9,7 +9,7 @@
       "writing_intelligence",
       "pattern_intelligence"
     ],
-    "parse_time_ms": 2552
+    "parse_time_ms": 1243
   },
   "files": {
     "rp_engine/__init__.py": {
@@ -14937,7 +14937,7 @@
               "is_async": false
             },
             "_parse_lorebooks": {
-              "lines": 15,
+              "lines": 19,
               "is_async": false
             }
           }
@@ -16430,7 +16430,7 @@
               "is_async": false
             },
             "_build_dynamic_sections": {
-              "lines": 197,
+              "lines": 203,
               "is_async": false
             },
             "_history_where": {
@@ -30898,32 +30898,8 @@
         },
         {
           "file": "rp_engine/services/guidelines_service.py",
-          "line": 92,
+          "line": 96,
           "receiver": "_cache",
-          "caller": "GuidelinesService.get_guidelines"
-        },
-        {
-          "file": "rp_engine/services/guidelines_service.py",
-          "line": 102,
-          "receiver": "frontmatter",
-          "caller": "GuidelinesService.get_guidelines"
-        },
-        {
-          "file": "rp_engine/services/guidelines_service.py",
-          "line": 103,
-          "receiver": "frontmatter",
-          "caller": "GuidelinesService.get_guidelines"
-        },
-        {
-          "file": "rp_engine/services/guidelines_service.py",
-          "line": 104,
-          "receiver": "frontmatter",
-          "caller": "GuidelinesService.get_guidelines"
-        },
-        {
-          "file": "rp_engine/services/guidelines_service.py",
-          "line": 105,
-          "receiver": "frontmatter",
           "caller": "GuidelinesService.get_guidelines"
         },
         {
@@ -31013,6 +30989,30 @@
         {
           "file": "rp_engine/services/guidelines_service.py",
           "line": 120,
+          "receiver": "frontmatter",
+          "caller": "GuidelinesService.get_guidelines"
+        },
+        {
+          "file": "rp_engine/services/guidelines_service.py",
+          "line": 121,
+          "receiver": "frontmatter",
+          "caller": "GuidelinesService.get_guidelines"
+        },
+        {
+          "file": "rp_engine/services/guidelines_service.py",
+          "line": 122,
+          "receiver": "frontmatter",
+          "caller": "GuidelinesService.get_guidelines"
+        },
+        {
+          "file": "rp_engine/services/guidelines_service.py",
+          "line": 123,
+          "receiver": "frontmatter",
+          "caller": "GuidelinesService.get_guidelines"
+        },
+        {
+          "file": "rp_engine/services/guidelines_service.py",
+          "line": 124,
           "receiver": "frontmatter",
           "caller": "GuidelinesService.get_guidelines"
         },
@@ -32098,31 +32098,19 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 825,
+          "line": 831,
           "receiver": "ex",
           "caller": "PromptAssembler.get_recent_exchanges_by_budget"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 825,
+          "line": 831,
           "receiver": "ex",
           "caller": "PromptAssembler.get_recent_exchanges_by_budget"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 888,
-          "receiver": "ex",
-          "caller": "PromptAssembler._exchanges_to_blocks"
-        },
-        {
-          "file": "rp_engine/services/prompt_assembler.py",
-          "line": 889,
-          "receiver": "ex",
-          "caller": "PromptAssembler._exchanges_to_blocks"
-        },
-        {
-          "file": "rp_engine/services/prompt_assembler.py",
-          "line": 893,
+          "line": 894,
           "receiver": "ex",
           "caller": "PromptAssembler._exchanges_to_blocks"
         },
@@ -32134,37 +32122,49 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 952,
+          "line": 899,
+          "receiver": "ex",
+          "caller": "PromptAssembler._exchanges_to_blocks"
+        },
+        {
+          "file": "rp_engine/services/prompt_assembler.py",
+          "line": 901,
+          "receiver": "ex",
+          "caller": "PromptAssembler._exchanges_to_blocks"
+        },
+        {
+          "file": "rp_engine/services/prompt_assembler.py",
+          "line": 958,
           "receiver": "card",
           "caller": "PromptAssembler._build_example_messages"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 958,
+          "line": 964,
           "receiver": "fm",
           "caller": "PromptAssembler._build_example_messages"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 961,
+          "line": 967,
           "receiver": "card",
           "caller": "PromptAssembler._build_example_messages"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 998,
+          "line": 1004,
           "receiver": "depths",
           "caller": "PromptAssembler.build_messages"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1012,
+          "line": 1018,
           "receiver": "note_row",
           "caller": "PromptAssembler.build_messages"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1014,
+          "line": 1020,
           "receiver": "note_row",
           "caller": "PromptAssembler.build_messages"
         },
@@ -34032,13 +34032,13 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 945,
+          "line": 951,
           "receiver": "self.db",
           "caller": "PromptAssembler._build_example_messages"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1008,
+          "line": 1014,
           "receiver": "self.db",
           "caller": "PromptAssembler.build_messages"
         },
@@ -35220,7 +35220,7 @@
         },
         {
           "file": "rp_engine/services/guidelines_service.py",
-          "line": 123,
+          "line": 127,
           "receiver": "_cache",
           "caller": "GuidelinesService.get_guidelines"
         },
@@ -36280,13 +36280,13 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 780,
+          "line": 786,
           "receiver": "self.db",
           "caller": "PromptAssembler.get_recent_exchanges"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 814,
+          "line": 820,
           "receiver": "self.db",
           "caller": "PromptAssembler.get_recent_exchanges_by_budget"
         },
@@ -36656,7 +36656,7 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 748,
+          "line": 754,
           "receiver": "AncestryResolver",
           "caller": "PromptAssembler._history_where"
         }
@@ -36724,7 +36724,7 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 845,
+          "line": 851,
           "receiver": "self.guidelines_service",
           "caller": "PromptAssembler._effective_injection_depths"
         }
@@ -37142,7 +37142,7 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 917,
+          "line": 923,
           "receiver": "depth_content",
           "caller": "PromptAssembler._inject_at_depths"
         },
@@ -37210,7 +37210,7 @@
         },
         {
           "file": "rp_engine/services/guidelines_service.py",
-          "line": 132,
+          "line": 136,
           "receiver": "_cache",
           "caller": "GuidelinesService.invalidate"
         },
@@ -37806,7 +37806,7 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 747,
+          "line": 753,
           "receiver": "self.ancestry_resolver",
           "caller": "PromptAssembler._history_where"
         }
@@ -40032,7 +40032,7 @@
       "_guidelines_path": [
         {
           "file": "rp_engine/services/guidelines_service.py",
-          "line": 87,
+          "line": 91,
           "receiver": "self",
           "caller": "GuidelinesService.get_guidelines"
         }
@@ -40040,7 +40040,7 @@
       "_parse_injection_depths": [
         {
           "file": "rp_engine/services/guidelines_service.py",
-          "line": 117,
+          "line": 121,
           "receiver": "self",
           "caller": "GuidelinesService.get_guidelines"
         }
@@ -40048,7 +40048,7 @@
       "_parse_prompt_order": [
         {
           "file": "rp_engine/services/guidelines_service.py",
-          "line": 118,
+          "line": 122,
           "receiver": "self",
           "caller": "GuidelinesService.get_guidelines"
         }
@@ -40056,7 +40056,7 @@
       "_parse_lorebooks": [
         {
           "file": "rp_engine/services/guidelines_service.py",
-          "line": 119,
+          "line": 123,
           "receiver": "self",
           "caller": "GuidelinesService.get_guidelines"
         }
@@ -40532,7 +40532,7 @@
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 997,
+          "line": 1003,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40556,13 +40556,13 @@
       "_history_where": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 777,
+          "line": 783,
           "receiver": "self",
           "caller": "PromptAssembler.get_recent_exchanges"
         },
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 805,
+          "line": 811,
           "receiver": "self",
           "caller": "PromptAssembler.get_recent_exchanges_by_budget"
         }
@@ -40570,7 +40570,7 @@
       "_effective_injection_depths": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 996,
+          "line": 1002,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40578,7 +40578,7 @@
       "build_system_prompt": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1019,
+          "line": 1025,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40586,7 +40586,7 @@
       "_build_example_messages": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1026,
+          "line": 1032,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40594,7 +40594,7 @@
       "_warn_if_static_overflows": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1037,
+          "line": 1043,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40602,7 +40602,7 @@
       "get_recent_exchanges_by_budget": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1038,
+          "line": 1044,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40610,7 +40610,7 @@
       "_history_token_budget": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1039,
+          "line": 1045,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40618,7 +40618,7 @@
       "get_recent_exchanges": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1043,
+          "line": 1049,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40626,7 +40626,7 @@
       "_exchanges_to_blocks": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1049,
+          "line": 1055,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }
@@ -40634,7 +40634,7 @@
       "_inject_at_depths": [
         {
           "file": "rp_engine/services/prompt_assembler.py",
-          "line": 1051,
+          "line": 1057,
           "receiver": "self",
           "caller": "PromptAssembler.build_messages"
         }

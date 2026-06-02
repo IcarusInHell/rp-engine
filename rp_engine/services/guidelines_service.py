@@ -67,8 +67,12 @@ class GuidelinesService:
     def _parse_lorebooks(raw: object) -> list[str] | None:
         """Coerce a frontmatter ``lorebooks`` value to a list of file stems.
 
-        Returns None when absent or not a list (so ALL per-RP lorebook files are
-        active — file-drop-and-go). Non-string / blank entries are dropped.
+        Returns None ONLY when absent or not a list (so ALL per-RP lorebook files
+        are active — file-drop-and-go). An EXPLICIT list — including an empty
+        ``lorebooks: []`` — is honored verbatim: ``[]`` means *no* per-RP files
+        active (deliberately distinct from absent, unlike ``prompt_order`` — for
+        content selection the empty-means-none reading is the intuitive one).
+        Non-string / blank entries are dropped with a warning.
         """
         if not isinstance(raw, list):
             return None
@@ -78,7 +82,7 @@ class GuidelinesService:
                 logger.warning("Ignoring non-string lorebooks entry %r", item)
                 continue
             cleaned.append(item.strip())
-        return cleaned or None
+        return cleaned
 
     def get_guidelines(self, rp_folder: str) -> GuidelinesResponse | None:
         """Load and cache guidelines. Returns None if file doesn't exist."""

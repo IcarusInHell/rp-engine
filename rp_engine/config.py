@@ -151,6 +151,7 @@ class InjectionConfig(BaseModel):
         "plot_threads": 4,
         "card_gaps": 4,
         "triggered_notes": 2,
+        "world_info": 2,
         "narrator_note": 2,
         "direction": 1,
     }
