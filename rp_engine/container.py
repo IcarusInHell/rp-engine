@@ -31,6 +31,8 @@ from rp_engine.services.file_watcher import FileWatcher
 from rp_engine.services.graph_resolver import GraphResolver
 from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.services.lance_store import LanceStore
+from rp_engine.services.lorebook_indexer import LorebookIndexer
+from rp_engine.services.lorebook_service import LorebookService
 from rp_engine.services.llm import LLMClient, build_providers
 from rp_engine.services.npc_brief_builder import NPCBriefBuilder
 from rp_engine.services.npc_engine import NPCEngine
@@ -117,6 +119,18 @@ class ServiceContainer:
             await branch_mgr_early.ensure_main_branch(folder)
 
         file_watcher = FileWatcher(card_indexer, vault_root, rp_folders)
+
+        # Lorebook (Phase 5b) — file-drop library indexed into lorebook_entries
+        # (cache). Per-RP Lorebooks/ folders + a global-library path. Source of
+        # truth is the files; this is an index rebuilt at startup / on change.
+        lorebook_indexer = LorebookIndexer(db, vault_root)
+        lb_total = 0
+        for folder in rp_folders:
+            lb_total += await lorebook_indexer.index_rp(folder)
+        lb_total += await lorebook_indexer.index_global(config.context.lorebook_global_path)
+        if lb_total:
+            logger.info("Indexed %d lorebook entries", lb_total)
+
         entity_extractor = EntityExtractor(db)
         scene_classifier = SceneClassifier(db)
         graph_resolver = GraphResolver(db)
@@ -243,6 +257,14 @@ class ServiceContainer:
             vault_root=vault_root,
         )
 
+        # Lorebook matcher reuses the SAME trigger_evaluator (reuse is concrete
+        # in the DI graph — no second matcher).
+        lorebook_service = LorebookService(
+            db=db,
+            trigger_evaluator=trigger_evaluator,
+            guidelines_service=guidelines_service,
+        )
+
         context_engine = ContextEngine(
             db=db,
             entity_extractor=entity_extractor,
@@ -257,6 +279,7 @@ class ServiceContainer:
             lance_store=lance_store,
             custom_state_manager=custom_state_manager,
             knowledge_resolver=knowledge_resolver,
+            lorebook_service=lorebook_service,
         )
 
         branch_manager = BranchManager(db=db, state_manager=state_manager, resolver=ancestry_resolver)

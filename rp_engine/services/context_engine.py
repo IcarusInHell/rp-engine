@@ -25,6 +25,7 @@ from rp_engine.models.context import (
     CustomStateBlock,
     ExtractedMemoryHit,
     FlaggedNPC,
+    LorebookEntryHit,
     NPCBrief,
     PastExchangeHit,
     SceneState,
@@ -78,6 +79,7 @@ class ContextEngine:
         lance_store: Any | None = None,
         custom_state_manager: Any | None = None,
         knowledge_resolver: Any | None = None,
+        lorebook_service: Any | None = None,
     ) -> None:
         self.db = db
         self.entity_extractor = entity_extractor
@@ -93,6 +95,7 @@ class ContextEngine:
         self.lance_store = lance_store
         self.custom_state_manager = custom_state_manager
         self.knowledge_resolver = knowledge_resolver
+        self.lorebook_service = lorebook_service
         self.branch_manager = None
         self.writing_intelligence = None
         self.diagnostic_logger = None  # injected by container
@@ -207,6 +210,16 @@ class ContextEngine:
             elif ft.inject_type == "card_reference" and ft.inject_card_path:
                 trigger_card_ids.append(ft.inject_card_path)
 
+        # ---- Stage 2.5b: Lorebook (World Info) — reuses TriggerEvaluator ----
+        lorebook_entries: list[LorebookEntryHit] = []
+        if self.lorebook_service:
+            try:
+                lorebook_entries = await self.lorebook_service.get_active_hits(
+                    rp_folder, branch, combined_text, signals
+                )
+            except Exception as e:
+                logger.warning("Lorebook matching failed: %s", e)
+
         # ---- Stage 3: NPC Handling (built BEFORE ranking so briefed NPCs are
         # excluded from the document pool *before* the max_documents slice — they're
         # already covered by the NPC Briefs section, and pre-slice exclusion lets
@@ -279,6 +292,7 @@ class ContextEngine:
             custom_state=custom_state_blocks,
             thread_alerts=thread_alerts,
             triggered_notes=triggered_notes,
+            lorebook_entries=lorebook_entries,
             card_gaps=card_gaps,
             past_exchanges=past_exchanges,
             extracted_memories=extracted_memories,

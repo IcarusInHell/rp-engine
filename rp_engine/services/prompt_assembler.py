@@ -42,7 +42,7 @@ _STATIC_SECTION_NAMES = frozenset({
 _DYNAMIC_SECTION_NAMES = frozenset({
     "scene_context", "character_states", "custom_state", "npc_briefs",
     "knowledge_boundaries", "plot_threads", "relevant_documents",
-    "triggered_notes", "past_exchanges", "card_gaps", "warnings",
+    "triggered_notes", "world_info", "past_exchanges", "card_gaps", "warnings",
     "writing_constraints",
 })
 _ALL_SECTION_NAMES = _STATIC_SECTION_NAMES | _DYNAMIC_SECTION_NAMES
@@ -54,7 +54,7 @@ DEFAULT_PROMPT_ORDER: list[str] = [
     "writing_principles", "rp_guidelines", "npc_framework", "output_format",
     "scene_context", "character_states", "custom_state", "npc_briefs",
     "knowledge_boundaries", "plot_threads", "relevant_documents",
-    "triggered_notes", "past_exchanges", "card_gaps", "warnings",
+    "triggered_notes", "world_info", "past_exchanges", "card_gaps", "warnings",
     "writing_constraints",
 ]
 
@@ -675,6 +675,14 @@ class PromptAssembler:
             for note in context_response.triggered_notes:
                 items.append(f"- [{note.inject_type}] {note.content}")
             sections.append(("triggered_notes", "\n".join(items)))
+
+        # World Info (lorebook hits — structural sibling of Triggered Notes).
+        # Non-empty guarded so a lorebook-less RP keeps a byte-identical prompt.
+        if context_response.lorebook_entries:
+            items = ["\n\n# World Info\n"]
+            for hit in context_response.lorebook_entries:
+                items.append(hit.content)
+            sections.append(("world_info", "\n".join(items)))
 
         # Past Exchange Echoes
         if context_response.past_exchanges:
