@@ -32,6 +32,8 @@ _RRF_K = 60
 
 @dataclass
 class SearchResult:
+    """One hybrid-search hit — chunk content, source-card metadata, and the fused RRF relevance score."""
+
     content: str
     file_path: str | None = None
     rp_folder: str | None = None
@@ -325,7 +327,14 @@ class VectorSearch:
         vector_results: list[tuple[int, float]],
         bm25_results: list[tuple[int, float]],
     ) -> list[tuple[int, float]]:
-        """Reciprocal Rank Fusion of vector + BM25 results."""
+        """Reciprocal Rank Fusion of vector + BM25 results.
+
+        NOTE (dormant-and-displaced-helpers A3): duplicates the shared
+        ``utils/search_ranking.reciprocal_rank_fusion`` — same weighted-RRF
+        formula (k=60). Consolidation target: replace this body with a call to
+        that helper, adapting the dict↔sorted-list shape and passing the
+        config-driven vector/bm25 weights. Cross-linked from the helper too.
+        """
         scores: dict[int, float] = {}
 
         for rank, (row_id, _) in enumerate(vector_results):

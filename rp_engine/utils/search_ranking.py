@@ -24,6 +24,11 @@ def reciprocal_rank_fusion(
     Each source is ranked by descending score; an item's contribution is
     ``weight / (k + rank + 1)`` (rank is 0-based). An item present in both
     sources accumulates both contributions. Keys are ``exchange_number``.
+
+    NOTE (dormant-and-displaced-helpers A3): ``VectorSearch._rrf_fuse``
+    (services/vector_search.py) is a parallel copy of this same weighted-RRF
+    formula on the card/vector-search path — it should be consolidated into this
+    shared helper (adapting its pre-sorted-list I/O and config-driven weights).
     """
     scored: dict[int, float] = {}
     semantic_ranked = sorted(semantic_hits.items(), key=lambda x: -x[1])

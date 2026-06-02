@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 
 class WritingFeedbackBody(BaseModel):
+    """User feedback on a generated writing sample — accept, rewrite, or critique."""
     original_output: str
     user_feedback: str | None = None
     user_rewrite: str | None = None

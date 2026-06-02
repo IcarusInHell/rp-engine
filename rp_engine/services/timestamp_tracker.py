@@ -126,6 +126,8 @@ _NEGATION = re.compile(
 
 @dataclass
 class Modifier:
+    """A pace modifier — its name, time multiplier, and the regex that detects it in response text."""
+
     name: str
     multiplier: float
     pattern: re.Pattern

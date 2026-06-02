@@ -193,15 +193,18 @@ async def test_empty_lorebooks_list_means_none_active(db, tmp_path, monkeypatch)
 # ---------------------------------------------------------------------------
 # Documented deviation: lorebook keyword matching is SUBSTRING (evaluator reuse),
 # NOT word-boundary. The plan's verification asked for word-boundary, but the
-# shared TriggerEvaluator matches raw substrings (a fork would violate reuse +
-# the 5a additive-union guarantee). This locks the ACTUAL behavior so it isn't
-# silently wrong: "art" DOES match within "start".
+# keyword-derived lorebook hits are gated by a WORD-BOUNDARY post-filter (the
+# stated Phase 5b deliverable, "art ∌ start"), applied on the lorebook side AFTER
+# the reused evaluator — no fork of the shared matcher, no change to the 5a union.
 # ---------------------------------------------------------------------------
 
-async def test_keyword_matching_is_substring_inherited_from_evaluator(db, tmp_path, monkeypatch):
+async def test_keyword_matching_is_word_boundary_not_substring(db, tmp_path, monkeypatch):
+    """The delivered criterion: a keyword matches only as a WHOLE WORD. 'art' must
+    NOT fire inside 'start', but MUST fire on a standalone 'art'. Mutation guard:
+    disabling the _keyword_word_boundary gate reddens the substring case."""
     ctx = ContextConfig()
     ctx.lorebook_enabled = True
-    cfg = SimpleNamespace(context=ctx, prompt=SimpleNamespace(trigger_stemming=False))
+    cfg = SimpleNamespace(context=ctx, prompt=SimpleNamespace(trigger_stemming=True))
     monkeypatch.setattr("rp_engine.services.lorebook_service.get_config", lambda: cfg)
     monkeypatch.setattr("rp_engine.services.trigger_evaluator.get_config", lambda: cfg)
 
@@ -212,9 +215,31 @@ async def test_keyword_matching_is_substring_inherited_from_evaluator(db, tmp_pa
     await idx.index_rp("rp1")
     svc = LorebookService(db, TriggerEvaluator(db), GuidelinesService(tmp_path))
 
-    hit = await svc.get_active_hits("rp1", "main", "they made a fresh start", {})
-    assert [h.content for h in hit] == ["ART"], (
-        "DOCUMENTED: keyword match is substring (inherited from TriggerEvaluator "
-        "reuse) — 'art' matches within 'start'. Word-boundary precision is a "
-        "deferred refinement on the shared evaluator, not forked here."
-    )
+    # substring INSIDE a larger word → dropped (the stated deliverable).
+    no_hit = await svc.get_active_hits("rp1", "main", "they made a fresh start", {})
+    assert no_hit == [], "'art' must NOT match inside 'start' (word-boundary)"
+    # standalone whole word → fires.
+    hit = await svc.get_active_hits("rp1", "main", "she studied the art of war", {})
+    assert [h.content for h in hit] == ["ART"], "'art' as a whole word must fire"
+
+
+async def test_keyword_word_boundary_keeps_morphology(db, tmp_path, monkeypatch):
+    """Word-boundary must not break stemming: keyword 'cat' still fires on 'cats'
+    (whole-token stem match), it just won't fire inside 'category'."""
+    ctx = ContextConfig()
+    ctx.lorebook_enabled = True
+    cfg = SimpleNamespace(context=ctx, prompt=SimpleNamespace(trigger_stemming=True))
+    monkeypatch.setattr("rp_engine.services.lorebook_service.get_config", lambda: cfg)
+    monkeypatch.setattr("rp_engine.services.trigger_evaluator.get_config", lambda: cfg)
+
+    lb = tmp_path / "rp1" / "Lorebooks"
+    lb.mkdir(parents=True)
+    (lb / "b.json").write_text(json.dumps({"name": "b", "entries": {"0": {"keys": ["cat"], "content": "CAT"}}}))
+    idx = LorebookIndexer(db, tmp_path)
+    await idx.index_rp("rp1")
+    svc = LorebookService(db, TriggerEvaluator(db), GuidelinesService(tmp_path))
+
+    assert [h.content for h in await svc.get_active_hits("rp1", "main", "three cats sat", {})] == ["CAT"], \
+        "stemmed whole-token 'cats'→'cat' must still fire"
+    assert await svc.get_active_hits("rp1", "main", "a category error", {}) == [], \
+        "'cat' must NOT fire inside 'category'"

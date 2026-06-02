@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
 
 
 class DiagnosticStatusResponse(BaseModel):
+    """Diagnostic log status — enabled flag, level, current file size, entry/archive counts, last-entry timestamp, and auto-report config."""
+
     enabled: bool
     level: str
     file_size_bytes: int
@@ -29,6 +31,8 @@ class DiagnosticStatusResponse(BaseModel):
 
 
 class DiagnosticUpdateRequest(BaseModel):
+    """Partial update to diagnostic settings — every field optional; only supplied fields are merged."""
+
     enabled: bool | None = None
     level: str | None = None
     max_file_size_mb: int | None = None
@@ -39,6 +43,8 @@ class DiagnosticUpdateRequest(BaseModel):
 
 
 class DiagnosticReportResponse(BaseModel):
+    """Result of sending a log report to the configured webhook — ok flag with status code, error, and the reporter key used."""
+
     ok: bool
     status_code: int | None = None
     error: str | None = None
@@ -46,6 +52,8 @@ class DiagnosticReportResponse(BaseModel):
 
 
 class DiagnosticClearResponse(BaseModel):
+    """Result of clearing logs — ok flag plus the number of files removed."""
+
     ok: bool
     files_removed: int
 

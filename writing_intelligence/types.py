@@ -1,3 +1,5 @@
+"""Writing intelligence types — the 5 task-dimension enums, the writing-pattern category taxonomy, and the TaskSignature / InjectionPayload dataclasses."""
+
 from dataclasses import dataclass, field
 from enum import Enum
 # Re-export shared types from base package
@@ -14,6 +16,8 @@ from pattern_intelligence.types import (
 # === TRIGGER DIMENSION ENUMS (Writing-specific) ===
 
 class Mode(str, Enum):
+    """Writing mode — the task-intent dimension (drafting, continuing, revising, expanding, condensing)."""
+
     DRAFTING = "drafting"
     CONTINUING = "continuing"
     REVISING = "revising"
@@ -21,6 +25,8 @@ class Mode(str, Enum):
     CONDENSING = "condensing"
 
 class Register(str, Enum):
+    """Prose register — the passage's mode of writing (action, dialogue, introspection, description, exposition, transition)."""
+
     ACTION = "action"
     DIALOGUE = "dialogue"
     INTROSPECTION = "introspection"
@@ -29,11 +35,15 @@ class Register(str, Enum):
     TRANSITION = "transition"
 
 class Intensity(str, Enum):
+    """Emotional intensity of the passage — high / medium / low, inferred from keyword and punctuation cues."""
+
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 class Position(str, Enum):
+    """Narrative position — where the passage sits in the arc (opening, rising, climax, falling, closing, mid)."""
+
     OPENING = "opening"
     RISING = "rising"
     CLIMAX = "climax"
@@ -42,6 +52,8 @@ class Position(str, Enum):
     MID = "mid"
 
 class Element(str, Enum):
+    """Content element present in the passage — physical action, dialogue, internal thought, sensory detail, etc.; zero or more apply."""
+
     PHYSICAL_ACTION = "physical_action"
     DIALOGUE = "dialogue"
     INTERNAL_THOUGHT = "internal_thought"
@@ -54,6 +66,8 @@ class Element(str, Enum):
 # === PATTERN ENUMS ===
 
 class PatternCategory(str, Enum):
+    """Writing pattern category — the learned-pattern taxonomy (figurative-language, pacing, word-choice, reader-trust, ...)."""
+
     FIGURATIVE_LANGUAGE = "figurative_language"
     NARRATIVE_DISTANCE = "narrative_distance"
     INFORMATION_ORDERING = "information_ordering"
@@ -74,6 +88,8 @@ class PatternCategory(str, Enum):
 
 @dataclass
 class TaskSignature:
+    """The full 5-dimension fingerprint for one writing task — mode + register + intensity + position + content elements."""
+
     mode: Mode
     register: Register
     intensity: Intensity

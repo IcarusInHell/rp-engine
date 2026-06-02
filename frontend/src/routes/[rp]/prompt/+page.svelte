@@ -13,6 +13,8 @@
 	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import PromptStructurePanel from '$lib/components/PromptStructurePanel.svelte';
+	import LorebookPanel from '$lib/components/LorebookPanel.svelte';
 
 	let rpFolder = $derived($page.params.rp ?? '');
 
@@ -119,6 +121,14 @@
 	}
 
 	let bodyCharCount = $derived(guidelinesBody.length);
+	let showStructure = $state(false);
+	let showLorebooks = $state(false);
+
+	// Effective injection depths from the preview, sorted shallow→deep for display.
+	let injectionEnabled = $derived(preview?.injection?.enabled ?? false);
+	let depthEntries = $derived(
+		Object.entries(preview?.injection?.depths ?? {}).sort((a, b) => a[1] - b[1]),
+	);
 </script>
 
 {#if loading}
@@ -205,6 +215,42 @@
 
 		<!-- ═══ RIGHT: Body Editor + Preview ═══ -->
 		<div class="flex-1 min-w-0 flex flex-col gap-3">
+			<!-- Prompt structure: section order + injection depths -->
+			<div class="bg-surface border border-border-custom rounded-[10px] overflow-hidden shrink-0">
+				<button
+					class="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-surface2/30 transition-colors"
+					onclick={() => (showStructure = !showStructure)}
+				>
+					<span class="text-xs font-medium text-text-dim">Prompt Structure (section order + injection depth)</span>
+					<span class="text-[10px] text-text-dim/60">{showStructure ? '▲' : '▼'}</span>
+				</button>
+				{#if showStructure}
+					<div class="p-4 border-t border-border-custom max-h-96 overflow-y-auto">
+						<PromptStructurePanel
+							{rpFolder}
+							{injectionEnabled}
+							onSaved={() => { preview = null; if (showPreview) loadPreview(); }}
+						/>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Lorebooks: per-RP active-set + reindex -->
+			<div class="bg-surface border border-border-custom rounded-[10px] overflow-hidden shrink-0">
+				<button
+					class="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-surface2/30 transition-colors"
+					onclick={() => (showLorebooks = !showLorebooks)}
+				>
+					<span class="text-xs font-medium text-text-dim">Lorebooks (World Info active-set)</span>
+					<span class="text-[10px] text-text-dim/60">{showLorebooks ? '▲' : '▼'}</span>
+				</button>
+				{#if showLorebooks}
+					<div class="p-4 border-t border-border-custom max-h-96 overflow-y-auto">
+						<LorebookPanel {rpFolder} />
+					</div>
+				{/if}
+			</div>
+
 			<!-- Body editor -->
 			<div class="bg-surface border border-border-custom rounded-[10px] flex flex-col flex-1 min-h-0">
 				<div class="px-4 py-2.5 border-b border-border-custom flex items-center justify-between">
@@ -246,6 +292,28 @@
 									<Badge>{section}</Badge>
 								{/each}
 							</div>
+							{#if preview.injection}
+								<div class="px-4 py-2 border-b border-border-custom/50 bg-surface2/30">
+									<div class="flex items-center gap-2 mb-1">
+										<span class="text-[11px] text-text-dim">Injection depths:</span>
+										<Badge color={injectionEnabled ? 'var(--color-success)' : 'var(--color-text-dim)'}>
+											{injectionEnabled ? 'enabled' : 'disabled (all at depth 0)'}
+										</Badge>
+									</div>
+									{#if depthEntries.length}
+										<div class="flex flex-wrap gap-1.5">
+											{#each depthEntries as [name, depth]}
+												<span class="text-[11px] font-mono text-text-dim">
+													{name}<span class="text-accent">@{depth}</span>
+												</span>
+											{/each}
+										</div>
+									{/if}
+									<p class="text-[10px] text-text-dim/50 mt-1">
+										Static preview shows the depth-0 system message; depths apply at runtime when injection is enabled.
+									</p>
+								</div>
+							{/if}
 							<div class="p-4 max-h-80 overflow-y-auto">
 								<pre class="text-xs text-text whitespace-pre-wrap font-mono leading-relaxed">{preview.system_prompt}</pre>
 							</div>

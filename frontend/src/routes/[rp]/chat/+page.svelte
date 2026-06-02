@@ -14,6 +14,7 @@
 	import SectionLabel from '$lib/components/ui/SectionLabel.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import InfoRow from '$lib/components/ui/InfoRow.svelte';
+	import NarratorNotePanel from '$lib/components/NarratorNotePanel.svelte';
 	import { formatTime } from '$lib/utils/format';
 
 	// ── Chat state ────────────────────────────────────────────
@@ -911,6 +912,7 @@
 			{/snippet}
 			{#snippet actions()}
 				{#if session}
+					<NarratorNotePanel {session} onUpdated={(s) => (session = s)} />
 					<Btn onclick={handleEndSession} disabled={sessionEnding}>
 						{sessionEnding ? 'Ending...' : 'End Session'}
 					</Btn>

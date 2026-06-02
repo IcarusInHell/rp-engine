@@ -141,11 +141,21 @@ def test_content_hash_changes_when_sidecar_changes(tmp_path):
 
 
 def test_content_hash_body_only_without_sidecar(tmp_path):
+    """No sidecar → hash is exactly hash_content(.md text), and distinct bodies
+    hash distinctly. (Not f(x)==f(x) — that would stay green for any constant.)"""
+    from rp_engine.utils.text import hash_content
+
     md = tmp_path / "plain.md"
     md.write_text("Just a body.\n", encoding="utf-8")
     indexer = _bare_indexer(tmp_path)
-    # No sidecar → hash is over the .md alone; stable and non-empty.
-    assert indexer._compute_content_hash(md) == indexer._compute_content_hash(md)
+
+    # The no-sidecar hash must equal the hash of the .md content itself.
+    assert indexer._compute_content_hash(md) == hash_content("Just a body.\n")
+
+    # A different body must produce a different hash (rules out a constant return).
+    other = tmp_path / "other.md"
+    other.write_text("A different body.\n", encoding="utf-8")
+    assert indexer._compute_content_hash(md) != indexer._compute_content_hash(other)
 
 
 # ---------------------------------------------------------------------------
@@ -326,3 +336,57 @@ async def test_sidecar_deletion_orphan_warns_loudly(built_container, primed_conf
     assert any("Sidecar removed" in r.message for r in caplog.records), (
         "an orphaned body-only .md after sidecar deletion must warn loudly (silent-drop guard)"
     )
+
+
+# ---------------------------------------------------------------------------
+# cards.auto_migrate — opt-in startup conversion of legacy cards
+# ---------------------------------------------------------------------------
+
+
+def test_auto_migrate_defaults_off():
+    """The escape hatch exists and is OFF by default (un-migrated cards keep YAML)."""
+    import rp_engine.config as rp_config
+
+    rp_config.get_config.cache_clear()
+    assert rp_config.get_config().cards.auto_migrate is False
+
+
+async def test_auto_migrate_converts_legacy_cards_on_startup(primed_config, monkeypatch):
+    """With cards.auto_migrate=true, ServiceContainer.build converts legacy YAML
+    cards to body-only + sidecar on disk before indexing — so no YAML reaches the
+    prompt for ANY card, not just new/migrated ones. Mutation-proven: gate the
+    container hook off and the legacy .md still has its frontmatter (red)."""
+    import rp_engine.config as rp_config
+    from tests.conftest import FakeProvider, RP_FOLDER
+
+    vault = Path(primed_config.paths.vault_root)
+    chars = vault / RP_FOLDER / "Story Cards" / "Characters"
+    chars.mkdir(parents=True, exist_ok=True)
+    legacy = chars / "legacy_hank.md"
+    legacy.write_text(
+        "---\ntype: character\nname: Hank\n---\nHank guards the vault.\n", encoding="utf-8"
+    )
+
+    monkeypatch.setenv("RP_ENGINE_CARDS__AUTO_MIGRATE", "true")
+    rp_config.get_config.cache_clear()
+    cfg = rp_config.get_config()
+    assert cfg.cards.auto_migrate is True, "env override must enable auto_migrate"
+
+    fake = FakeProvider(dimension=cfg.search.embedding_dimension)
+    monkeypatch.setattr(
+        "rp_engine.container.build_providers", lambda config: {config.llm.provider: fake}
+    )
+
+    from rp_engine.container import ServiceContainer
+
+    container = await ServiceContainer.build(cfg)
+    try:
+        # The legacy .md is now body-only on disk, with a sidecar holding metadata.
+        assert legacy.read_text(encoding="utf-8").strip() == "Hank guards the vault."
+        assert "---" not in legacy.read_text(encoding="utf-8")
+        sidecar = chars / ".meta" / "legacy_hank.json"
+        assert sidecar.exists(), "auto_migrate must write the sidecar on startup"
+        assert json.loads(sidecar.read_text())["name"] == "Hank"
+    finally:
+        await container.close()
+        rp_config.get_config.cache_clear()

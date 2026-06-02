@@ -29,6 +29,7 @@ from rp_engine.services.llm_client import LLMClient
 from rp_engine.services.state_entry_resolver import latest_character_states_batch
 from rp_engine.services.vector_search import VectorSearch
 from rp_engine.utils.json_helpers import safe_parse_json, safe_parse_json_list
+from rp_engine.utils.normalization import make_entity_id
 from rp_engine.utils.trust import fetch_trust_map, fetch_trust_pair, trust_stage
 
 if TYPE_CHECKING:
@@ -336,11 +337,16 @@ class NPCEngine:
     ) -> TrustRelationship:
         """Load the NPC↔PC trust relationship: role dynamic, score, recent history.
 
-        The trust reads OR-merge both directions (the Phase 2 directional-read fix
-        has not landed yet). Kept verbatim from the inline version so the baseline
-        stays honest — direction is corrected in Phase 2, not here.
+        Score and history are DIRECTIONAL npc→pov (fetch_trust_pair + an npc→pov
+        history filter) — never OR-merged; only the role/dynamic lookup checks both
+        directions (a relationship role is mutual).
         """
-        # Relationship dynamic (role) from entity_connections
+        # Relationship dynamic (role) from entity_connections.
+        # Both endpoints are stored as "rp_folder:normalize_key(name)", NOT bare
+        # names — build the lookup keys the same way (else this silently misses
+        # and dynamic is always None). See utils.normalization.make_entity_id.
+        key_npc = make_entity_id(rp_folder, npc_name)
+        key_pov = make_entity_id(rp_folder, pov_character)
         dynamic_row = await self.db.fetch_one(
             """SELECT role FROM entity_connections
                WHERE connection_type = 'has_relationship'
@@ -348,7 +354,7 @@ class NPCEngine:
                    OR (LOWER(from_entity) = LOWER(?) AND LOWER(to_entity) = LOWER(?)))
                  AND role IS NOT NULL
                LIMIT 1""",
-            [npc_name, pov_character, pov_character, npc_name],
+            [key_npc, key_pov, key_pov, key_npc],
         )
         dynamic = dynamic_row["role"] if dynamic_row else None
 

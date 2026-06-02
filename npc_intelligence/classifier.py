@@ -1,3 +1,5 @@
+"""NPC behavioral classifier — maps structured RP-Engine inputs (archetype/modifiers/trust/scene) into a BehavioralSignature, deterministic and zero-LLM."""
+
 from __future__ import annotations
 
 from .types import (
@@ -40,6 +42,8 @@ _TRUST_RANGES = [
 
 
 class BehavioralClassifier:
+    """Builds a BehavioralSignature from RP inputs — normalizes archetype/modifier strings, derives trust stage from score, filters scene signals, detects interaction type from the prompt."""
+
     def __init__(self):
         pass
 

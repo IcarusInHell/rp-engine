@@ -14,18 +14,21 @@ from rp_engine.models.enums import (
 
 
 class ChunkingConfig(BaseModel):
+    """Embedding chunking settings — strategy, size, and overlap."""
     strategy: str = "fixed"
     chunk_size: int = 1000
     chunk_overlap: int = 200
 
 
 class ChunkingUpdate(BaseModel):
+    """Partial update to chunking settings (all fields optional)."""
     strategy: str | None = None
     chunk_size: int | None = None
     chunk_overlap: int | None = None
 
 
 class RechunkResponse(BaseModel):
+    """Result of re-embedding an RP's exchanges — counts of embedded, skipped, failed."""
     status: str
     total_exchanges: int = 0
     embedded: int = 0
@@ -34,6 +37,7 @@ class RechunkResponse(BaseModel):
 
 
 class RPCreate(BaseModel):
+    """Request to create an RP — name plus POV, voice, tense, and pacing guidelines."""
     rp_name: str
     pov_mode: PovMode = "single"
     dual_characters: list[str] = []
@@ -45,11 +49,13 @@ class RPCreate(BaseModel):
 
 
 class RPResponse(BaseModel):
+    """Result of creating an RP — the folder and files written."""
     rp_folder: str
     created_files: list[str] = []
 
 
 class RPInfo(BaseModel):
+    """Summary of an RP — card/guidelines/avatar presence and branch list."""
     rp_folder: str
     has_story_cards: bool
     card_count: int
@@ -59,11 +65,13 @@ class RPInfo(BaseModel):
 
 
 class ExportRequest(BaseModel):
+    """Request to export an RP — optional-table inclusion and branch selection."""
     include_optional: bool = True
     branches: list[str] | None = None  # None = all branches
 
 
 class ExportStats(BaseModel):
+    """Counts of records written in an export."""
     exchange_count: int = 0
     session_count: int = 0
     card_count: int = 0
@@ -74,6 +82,7 @@ class ExportStats(BaseModel):
 
 
 class ImportStats(BaseModel):
+    """Counts of records read in an import, plus any warnings."""
     sessions_imported: int = 0
     exchanges_imported: int = 0
     branches_imported: int = 0
@@ -86,12 +95,14 @@ class ImportStats(BaseModel):
 
 
 class ImportResponse(BaseModel):
+    """Result of importing an RP — target folder and import stats."""
     status: str
     rp_folder: str
     stats: ImportStats
 
 
 class GuidelinesResponse(BaseModel):
+    """Resolved Story_Guidelines.md settings — narrative style plus per-RP prompt overrides (injection_depths, prompt_order, lorebooks)."""
     pov_mode: PovMode | None = None
     dual_characters: list[str] = []
     narrative_voice: NarrativeVoice | None = None

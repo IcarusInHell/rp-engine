@@ -7,6 +7,7 @@ from .types import TaskSignature, InjectionPayload, ScoredPattern
 
 
 class InjectionFormatter(BaseInjectionFormatter):
+    """Formats scored patterns into the `[WRITING CONSTRAINTS]` prompt block — token-budgeted, with an intensity/register/position/elements header."""
 
     def __init__(self, token_budget: int = 600,
                  count_tokens: Optional[Callable[[str], int]] = None):
@@ -14,6 +15,7 @@ class InjectionFormatter(BaseInjectionFormatter):
 
     def format(self, scored_patterns: list[ScoredPattern],
                task_sig: TaskSignature) -> InjectionPayload:
+        """Format scored patterns into an InjectionPayload, wrapping the base formatter's text/token/id triple with the task signature."""
         full_text, actual_tokens, included_ids = super().format(
             scored_patterns, task_sig)
         return InjectionPayload(

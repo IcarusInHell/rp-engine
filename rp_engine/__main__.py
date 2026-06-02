@@ -44,6 +44,7 @@ def _run_migrate_cards(args: argparse.Namespace) -> None:
 
 
 def main():
+    """Console-script / `python -m rp_engine` entry point — parses args and dispatches to the server (default) or the migrate-cards subcommand."""
     config = get_config()
 
     parser = argparse.ArgumentParser(description="RP Engine")

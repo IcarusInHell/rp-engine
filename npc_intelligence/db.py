@@ -7,6 +7,8 @@ from .types import BehavioralCategory, BehavioralSignature
 
 
 class BehavioralPatternDB(BasePatternDB):
+    """NPC behavioral pattern store — BasePatternDB bound to BehavioralCategory; serializes the 5-dimension behavioral signature to its trigger row."""
+
     _category_enum = BehavioralCategory
 
     def __init__(self, db_path: str = "npc_intelligence.db"):

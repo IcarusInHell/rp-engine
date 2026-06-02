@@ -111,6 +111,18 @@ class ServiceContainer:
         # ---- Tier 1: Stateless services ----
         card_indexer = CardIndexer(db, vault_root)
         rp_folders = card_indexer.get_all_rp_folders()
+
+        # Opt-in: convert legacy YAML cards to the body-only sidecar format on
+        # disk before indexing, so every card injects clean prose. Off by default
+        # (cards.auto_migrate) — un-migrated legacy cards keep their YAML.
+        if config.cards.auto_migrate:
+            from rp_engine.migrate_cards import migrate_cards
+
+            report = migrate_cards(vault_root)
+            logger.info("auto_migrate cards: %s", report.summary())
+            for err in report.errors:
+                logger.warning("auto_migrate error: %s", err)
+
         for folder in rp_folders:
             result = await card_indexer.full_index(folder)
             logger.info("Indexed %s: %d entities", folder, result["entities"])
@@ -338,13 +350,6 @@ class ServiceContainer:
         if config.auto_save.enabled:
             auto_save_manager.set_active(True)
 
-        # Inject diagnostic logger into services for structured logging
-        for svc in (
-            llm_client, context_engine, analysis_pipeline,
-            npc_engine, state_manager, exchange_writer, file_watcher,
-        ):
-            svc.diagnostic_logger = diagnostic_logger
-
         summary_builder = SummaryBuilder(db=db, lance_store=lance_store, llm_client=llm_client)
         recap_builder = RecapBuilder(
             db=db,
@@ -360,6 +365,16 @@ class ServiceContainer:
             llm_client=llm_client,
             exchange_writer=exchange_writer,
         )
+
+        # Inject diagnostic logger into services for structured logging (late-bind,
+        # after construction). chat_manager is included so its provenance drop-ledger
+        # flush can write through the diagnostic sink.
+        for svc in (
+            llm_client, context_engine, analysis_pipeline,
+            npc_engine, state_manager, exchange_writer, file_watcher,
+            chat_manager,
+        ):
+            svc.diagnostic_logger = diagnostic_logger
 
         return cls(
             db=db,

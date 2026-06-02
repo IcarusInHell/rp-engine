@@ -15,6 +15,8 @@ from .proficiency import ProficiencyUpdater
 
 
 class WritingIntelligence(BasePatternIntelligence):
+    """Writing intelligence orchestrator — wires classifier + retriever + formatter + feedback/proficiency over a writing PatternDB."""
+
     def __init__(self, db_path: str = "writing_intelligence.db",
                  token_budget: int = 600,
                  llm_call: Optional[Callable[[str], str]] = None,
@@ -30,6 +32,7 @@ class WritingIntelligence(BasePatternIntelligence):
 
     def prepare(self, prompt: str, preceding_content: Optional[str] = None,
                 task_override: Optional[dict] = None) -> InjectionPayload:
+        """Classify the writing task, retrieve matching patterns, and format the injection payload (logging the signature + included patterns)."""
         task_sig = self.classifier.classify(prompt, preceding_content, task_override)
         scored = self.retriever.retrieve(task_sig)
         payload = self.formatter.format(scored, task_sig)

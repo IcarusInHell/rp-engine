@@ -61,6 +61,7 @@ from rp_engine.models.enums import (
 # ---------------------------------------------------------------------------
 
 class CharacterFrontmatter(BaseModel):
+    """Frontmatter schema for character cards — covers both PCs and NPCs (npc is an alias)."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["character"] = "character"
@@ -133,6 +134,7 @@ class CharacterFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class MemoryFrontmatter(BaseModel):
+    """Frontmatter schema for memory cards — a remembered event with emotional tone and who recalls it."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["memory"] = "memory"
@@ -168,6 +170,7 @@ class MemoryFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SecretFrontmatter(BaseModel):
+    """Frontmatter schema for secret cards — who knows, discovery risk, and revelation plan."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["secret"] = "secret"
@@ -210,6 +213,7 @@ class SecretFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class LocationFrontmatter(BaseModel):
+    """Frontmatter schema for location cards — category, access, atmosphere, and occupants."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["location"] = "location"
@@ -244,6 +248,7 @@ class LocationFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class OrganizationFrontmatter(BaseModel):
+    """Frontmatter schema for organization cards — structure, influence, members, and rivals."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["organization"] = "organization"
@@ -280,6 +285,7 @@ class OrganizationFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PlotThreadFrontmatter(BaseModel):
+    """Frontmatter schema for plot-thread cards — priority, phase, and counter/time tracking."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["plot_thread"] = "plot_thread"
@@ -317,6 +323,7 @@ class PlotThreadFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PlotArcFrontmatter(BaseModel):
+    """Frontmatter schema for plot-arc cards — category, phase, beats, and related arcs."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["plot_arc"] = "plot_arc"
@@ -353,6 +360,7 @@ class PlotArcFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class KnowledgeFrontmatter(BaseModel):
+    """Frontmatter schema for knowledge cards — a belief (believes) vs the truth (reality) with confidence."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["knowledge"] = "knowledge"
@@ -384,6 +392,7 @@ class KnowledgeFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class LoreFrontmatter(BaseModel):
+    """Frontmatter schema for lore cards — tiered common/expert/secret world knowledge."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["lore"] = "lore"
@@ -412,6 +421,7 @@ class LoreFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ItemFrontmatter(BaseModel):
+    """Frontmatter schema for item cards — category, rarity, current holder, and properties."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["item"] = "item"
@@ -442,6 +452,7 @@ class ItemFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ChapterFrontmatter(BaseModel):
+    """Frontmatter schema for chapter-summary cards — timeline, POV/NPC roster, and thread changes."""
     model_config = ConfigDict(extra="allow")
 
     type: Literal["chapter_summary"] = "chapter_summary"

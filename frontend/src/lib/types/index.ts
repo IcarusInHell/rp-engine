@@ -15,3 +15,5 @@ export * from './chat';
 export * from './health';
 export * from './customState';
 export * from './vectors';
+export * from './prompt';
+export * from './lorebook';

@@ -1,9 +1,13 @@
+"""Writing task classifier — maps a prompt (+ preceding content) into a TaskSignature via keyword/punctuation heuristics, deterministic and zero-LLM."""
+
 from __future__ import annotations
 
 from .types import TaskSignature, Mode, Register, Intensity, Position, Element
 
 
 class TaskClassifier:
+    """Builds a TaskSignature from a writing prompt — detects mode/register/intensity/position/elements by keyword cues (override dict wins per-dimension)."""
+
     def __init__(self):
         pass
 

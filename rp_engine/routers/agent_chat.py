@@ -32,11 +32,15 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
 class AgentChatRequest(BaseModel):
+    """Request body for the agent-chat SSE endpoint — user message plus an optional session_id to resume a prior Agent SDK conversation."""
+
     user_message: str
     session_id: str | None = None
 
 
 class AgentStatusResponse(BaseModel):
+    """Availability status for the Agent SDK chat path — `available` flag with an optional `reason` when the SDK can't be resolved."""
+
     available: bool
     reason: str | None = None
 

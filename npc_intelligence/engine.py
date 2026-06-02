@@ -15,6 +15,8 @@ from .proficiency import ProficiencyUpdater
 
 
 class NPCIntelligence(BasePatternIntelligence):
+    """NPC behavioral intelligence orchestrator — wires classifier + retriever + formatter + feedback/proficiency over a BehavioralPatternDB."""
+
     def __init__(self, db_path: str = "npc_intelligence.db",
                  token_budget: int = 500,
                  llm_call: Optional[Callable[[str], str]] = None,
@@ -34,6 +36,7 @@ class NPCIntelligence(BasePatternIntelligence):
                 scene_signals: Optional[dict[str, float]] = None,
                 scene_prompt: str = "",
                 override: Optional[dict] = None) -> InjectionPayload:
+        """Classify the NPC moment, retrieve matching patterns, and format the injection payload (logging the signature + included patterns)."""
         behavioral_sig = self.classifier.classify(
             archetype=archetype,
             modifiers=modifiers,

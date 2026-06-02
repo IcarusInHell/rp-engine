@@ -42,6 +42,8 @@ _VALID_SCENE_FIELDS = {"location", "time_of_day", "mood", "in_story_timestamp"}
 
 @dataclass
 class FiredTrigger:
+    """A trigger that matched this turn — its injection payload, priority, and the conditions that fired it."""
+
     trigger_id: str
     trigger_name: str
     inject_type: str

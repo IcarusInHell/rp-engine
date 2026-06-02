@@ -17,6 +17,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 
 class ServerConfig(BaseModel):
+    """HTTP server settings — host/port, CORS origins, LAN access, and the optional `/v1/*` bearer api_key."""
+
     host: str = "0.0.0.0"
     port: int = 3000
     cors_origins: list[str] = [
@@ -30,11 +32,15 @@ class ServerConfig(BaseModel):
 
 
 class PathsConfig(BaseModel):
+    """Filesystem paths — the Obsidian vault root and the SQLite db path (both resolved relative to PROJECT_ROOT)."""
+
     vault_root: str = ".."
     db_path: str = "data/rp-engine.db"
 
 
 class LLMModelsConfig(BaseModel):
+    """Per-role model IDs — npc_reactions, response_analysis, card_generation, embeddings."""
+
     npc_reactions: str = "anthropic/claude-haiku"
     response_analysis: str = "google/gemini-2.0-flash-001"
     card_generation: str = "google/gemini-2.0-flash-001"
@@ -64,6 +70,8 @@ class LLMTemperaturesConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
+    """LLM settings — default provider, api_key, provider map, per-role models, fallback model, chat mode, and temperatures."""
+
     provider: str = "openrouter"
     api_key: str = "env:OPENROUTER_API_KEY"
     providers: dict[str, ProviderConfig] = {}
@@ -75,6 +83,8 @@ class LLMConfig(BaseModel):
 
 
 class PacingPresets(BaseModel):
+    """Scene-pacing → trigger-counter thresholds (fast/moderate/slow, each with gentle/moderate/strong cutoffs)."""
+
     fast: dict[str, int] = {"gentle": 3, "moderate": 5, "strong": 8}
     moderate: dict[str, int] = {"gentle": 5, "moderate": 10, "strong": 15}
     slow: dict[str, int] = {"gentle": 8, "moderate": 15, "strong": 20}
@@ -93,7 +103,20 @@ class TierThresholds(BaseModel):
     brief: float = 0.6
 
 
+class TierAllocation(BaseModel):
+    """Per-tier share of ``max_context_chars`` for the ``# Relevant Context``
+    documents-section budget (the tiered-context plan's optional budget). Each
+    tier is budgeted INDEPENDENTLY — an exhausted full share does not spill into
+    brief. Only consulted when ``max_context_chars > 0``.
+    """
+    full: float = 0.6
+    brief: float = 0.3
+    reference: float = 0.1
+
+
 class ContextConfig(BaseModel):
+    """Context-assembly settings — document/graph limits, tier thresholds + optional budget, past-exchange/memory retrieval, and the file-drop lorebook toggles."""
+
     max_documents: int = 5
     max_graph_hops: int = 2
     stale_threshold_turns: int = 8
@@ -105,6 +128,13 @@ class ContextConfig(BaseModel):
     extracted_memory_min_score: float = 0.5
     include_custom_state: bool = True
     max_card_content_length: int = 5000
+    # Per-tier documents-section budget (tiered-context optional enhancement).
+    # 0 = DISABLED (no budget; default off → byte-identical to pre-budget output).
+    # When > 0, the `# Relevant Context` section is bounded to this many chars,
+    # split per tier via `tier_allocation`; over-budget docs are dropped
+    # lowest-priority-first within each tier (logged), top doc always admitted.
+    max_context_chars: int = 0
+    tier_allocation: TierAllocation = TierAllocation()
     pacing_presets: PacingPresets = PacingPresets()
     # Phase 5b — file-drop lorebook. Matching reuses TriggerEvaluator; budget is
     # char-based (mirrors the Phase 3 tiered-context content[:max_len] slicing —
@@ -116,6 +146,8 @@ class ContextConfig(BaseModel):
 
 
 class ChatConfig(BaseModel):
+    """Chat-generation settings — exchange window, model/temperature/max_tokens, variant cap, regenerate bump, and continue/truncation behavior."""
+
     exchange_window: int = 10
     model: str | None = None
     temperature: float = 0.7
@@ -203,6 +235,8 @@ class PromptConfig(BaseModel):
 
 
 class SearchConfig(BaseModel):
+    """Hybrid-search + chunking settings — vector/BM25 weights, similarity threshold, chunk size/overlap, embedding dimension, vector-cache size."""
+
     vector_weight: float = 0.7
     bm25_weight: float = 0.3
     similarity_threshold: float = 0.7
@@ -214,6 +248,8 @@ class SearchConfig(BaseModel):
 
 
 class NPCConfig(BaseModel):
+    """NPC reaction settings — exchange-history search limit and minimum relevance score."""
+
     history_search_limit: int = 3
     history_min_score: float = 0.5
 
@@ -228,6 +264,8 @@ class ModifierTrustEffect(BaseModel):
 
 
 class TrustConfig(BaseModel):
+    """Trust-mechanics settings — per-step increase/decrease, per-session gain/loss caps, score clamp range, and per-modifier effects."""
+
     increase_value: int = 1
     decrease_value: int = 2
     session_max_gain: int = 8
@@ -238,6 +276,8 @@ class TrustConfig(BaseModel):
 
 
 class AutoReportConfig(BaseModel):
+    """Diagnostic auto-report settings — webhook URL and the on-error / on-session-end send triggers."""
+
     enabled: bool = False
     url: str = ""                    # webhook URL to POST logs to
     on_error: bool = True            # auto-send on unhandled errors
@@ -245,6 +285,8 @@ class AutoReportConfig(BaseModel):
 
 
 class DiagnosticConfig(BaseModel):
+    """Diagnostic-logging settings — enable flag, level, file rotation/retention, auto-purge, auto-report, and reporter key."""
+
     enabled: bool = False
     level: str = "full"              # "full" | "metadata"
     max_file_size_mb: int = 50       # rotate after this size
@@ -255,24 +297,44 @@ class DiagnosticConfig(BaseModel):
 
 
 class AnalysisConfig(BaseModel):
+    """Analysis-pipeline settings — the undo cascade depth."""
+
     undo_cascade_depth: int = 5
 
 
 class AutoSaveConfig(BaseModel):
+    """Auto-save toggle for the deprecated <output>-tag auto-save path (off by default)."""
+
     enabled: bool = False
 
 
 class ContinuityConfig(BaseModel):
+    """Continuity-checker settings — enable flag, max search results, minimum similarity."""
+
     enabled: bool = False
     max_search_results: int = 5
     min_similarity: float = 0.65
 
 
+class CardsConfig(BaseModel):
+    """Story-card settings — `auto_migrate` converts legacy YAML cards to the sidecar format on startup (off by default)."""
+
+    # When true, convert every RP's legacy YAML cards to the body-only sidecar
+    # format on startup (all folders) before indexing. Off by default —
+    # migration is intentional; un-migrated legacy cards keep their YAML in
+    # story_cards.content and still inject it into prompts until converted.
+    auto_migrate: bool = False
+
+
 class RPConfig(BaseModel):
+    """Per-RP defaults — the default POV character."""
+
     default_pov_character: str = "Lilith"
 
 
 class RPEngineConfig(BaseSettings):
+    """Root configuration — composes every config section; env via the RP_ENGINE_ prefix + nested `__` delimiter, plus the standalone OPENROUTER_API_KEY."""
+
     model_config = SettingsConfigDict(
         env_prefix="RP_ENGINE_",
         env_file=(".env", "../.env"),
@@ -284,6 +346,7 @@ class RPEngineConfig(BaseSettings):
     paths: PathsConfig = PathsConfig()
     llm: LLMConfig = LLMConfig()
     context: ContextConfig = ContextConfig()
+    cards: CardsConfig = CardsConfig()
     chat: ChatConfig = ChatConfig()
     prompt: PromptConfig = PromptConfig()
     search: SearchConfig = SearchConfig()

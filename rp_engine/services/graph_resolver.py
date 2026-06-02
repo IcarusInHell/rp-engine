@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ResolvedConnection:
+    """One entity reached by graph traversal — its card identity, hop distance from a seed, and the path taken."""
+
     entity_id: str
     entity_name: str
     card_type: str

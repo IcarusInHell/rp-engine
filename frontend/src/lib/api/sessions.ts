@@ -29,3 +29,23 @@ export async function getSessionTimeline(sessionId: string): Promise<SessionTime
 		`/api/sessions/${encodeURIComponent(sessionId)}/timeline`
 	);
 }
+
+/** Set/replace the session's narrator note (Phase 5a — session-persistent GM steering). */
+export async function setNarratorNote(
+	sessionId: string,
+	note: string,
+	depth = 2,
+): Promise<SessionResponse> {
+	return apiFetch<SessionResponse>(
+		`/api/sessions/${encodeURIComponent(sessionId)}/narrator-note`,
+		{ method: 'PUT', body: JSON.stringify({ note, depth }) },
+	);
+}
+
+/** Clear the session's narrator note. */
+export async function clearNarratorNote(sessionId: string): Promise<SessionResponse> {
+	return apiFetch<SessionResponse>(
+		`/api/sessions/${encodeURIComponent(sessionId)}/narrator-note`,
+		{ method: 'DELETE' },
+	);
+}

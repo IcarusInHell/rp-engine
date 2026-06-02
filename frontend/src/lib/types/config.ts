@@ -38,6 +38,20 @@ export interface AppConfig {
 	};
 	diagnostics: DiagnosticConfig;
 	rp: { default_pov_character: string };
+	// Phase 6: global prompt config (per-RP overrides live in Story_Guidelines.md).
+	prompt: PromptConfig;
+}
+
+export interface PromptConfig {
+	trigger_stemming: boolean;
+	injection: { enabled: boolean; depths: Record<string, number> };
+	token_budget: {
+		enabled: boolean;
+		model_context_window: number;
+		safety_margin: number;
+		allocation: { system: number; context: number; history: number; reserve: number };
+	};
+	example_dialogue: { enabled: boolean; max_examples: number; pin_examples: boolean };
 }
 
 export interface DiagnosticConfig {
@@ -78,6 +92,7 @@ export interface ConfigUpdate {
 	trust?: Partial<AppConfig['trust']>;
 	diagnostics?: Partial<AppConfig['diagnostics']>;
 	rp?: Partial<AppConfig['rp']>;
+	prompt?: Partial<AppConfig['prompt']>;
 	openrouter_api_key?: string;
 }
 

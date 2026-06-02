@@ -2,7 +2,7 @@
 """
 MCP wrapper server for rp-engine REST API.
 
-Proxies 14 MCP tools to the rp-engine FastAPI backend via httpx.
+Proxies 16 MCP tools to the rp-engine FastAPI backend via httpx.
 All intelligence lives in the API -- this is a thin translation layer
 from MCP tool calls to HTTP requests.
 

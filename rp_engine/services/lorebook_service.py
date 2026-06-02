@@ -21,6 +21,8 @@ from rp_engine.models.context import LorebookEntryHit
 from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.services.trigger_evaluator import TriggerEvaluator
 from rp_engine.utils.json_helpers import safe_parse_json_array
+from rp_engine.utils.provenance import record_drop
+from rp_engine.utils.stemmer import stem, tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,15 @@ class LorebookService:
         hits: list[LorebookEntryHit] = []
         for row in rows:
             conditions, match_mode = self._effective_conditions(row)
+            # Keyword-DERIVED entries (no authored conditions) get the
+            # word-boundary precision gate below; explicit authored conditions
+            # are respected verbatim (the author chose near/substring semantics).
+            keyword_derived = not safe_parse_json_array(row.get("conditions"))
+            keywords = [
+                str(k) for k in (safe_parse_json_array(row.get("keywords")) or [])
+                if str(k).strip()
+            ]
+
             if row.get("always_on"):
                 matched, matched_raw, descs = True, True, ["always-on"]
             elif conditions:
@@ -110,6 +121,25 @@ class LorebookService:
                 continue
 
             if not matched:
+                continue
+
+            # Word-boundary precision gate (delivers the stated deliverable
+            # "art ∌ start" without forking the shared evaluator): a keyword-
+            # derived hit that matched only as a substring INSIDE a larger word
+            # is dropped. The evaluator still does the matching; this gates its
+            # accepted keyword hits. Single-token keywords only — multi-word
+            # phrases keep substring semantics (the evaluator's n-gram precedent).
+            if (keyword_derived and keywords and not row.get("always_on")
+                    and not self._keyword_word_boundary(keywords, combined_text)):
+                logger.debug(
+                    "Lorebook entry %s (%s) dropped: keyword matched only as a "
+                    "substring inside a larger word (no word-boundary hit)",
+                    row.get("id"), row.get("name"),
+                )
+                record_drop(
+                    "lorebook.word_boundary", "lorebook_entry", "substring_only",
+                    item_id=str(row.get("id")), detail=row.get("name"),
+                )
                 continue
 
             stem_only = bool(matched and not matched_raw)
@@ -150,6 +180,28 @@ class LorebookService:
         return [], "any"
 
     @staticmethod
+    def _keyword_word_boundary(keywords: list[str], text: str) -> bool:
+        """True if any keyword matches ``text`` at a WORD BOUNDARY (delivers the
+        Phase 5b "art ∌ start" precision criterion for keyword-derived entries).
+
+        Single-token keywords match only as a whole token — raw token membership
+        OR stemmed-token membership (so morphology still works: ``cat``↔``cats``).
+        Multi-word keywords keep substring semantics (phrases stay exact, matching
+        the evaluator's n-gram-exact precedent). Reuses ``utils/stemmer`` — the
+        SAME tokenizer/stemmer the evaluator uses, not a second one.
+        """
+        text_tokens = set(tokenize(text))
+        text_stems = {stem(t) for t in text_tokens}
+        for kw in keywords:
+            toks = tokenize(kw)
+            if len(toks) == 1:
+                if toks[0] in text_tokens or stem(toks[0]) in text_stems:
+                    return True
+            elif kw.lower() in text.lower():
+                return True
+        return False
+
+    @staticmethod
     def _budget(
         hits: list[LorebookEntryHit], budget_chars: int, scope: str
     ) -> list[LorebookEntryHit]:
@@ -168,6 +220,11 @@ class LorebookService:
                 used += cost
             else:
                 dropped += 1
+                record_drop(
+                    "lorebook.budget", "lorebook_entry", "over_budget",
+                    item_id=str(h.entry_id), score=h.budget_weight,
+                    detail=f"{scope} cost={cost}",
+                )
         if dropped:
             logger.info(
                 "Lorebook budget (%s): kept %d, DROPPED %d matched entries "

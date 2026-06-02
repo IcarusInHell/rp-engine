@@ -9,6 +9,9 @@ export interface SessionResponse {
   started_at: string;
   ended_at: string | null;
   metadata: Record<string, unknown> | null;
+  // Phase 5a/6: session-persistent narrator's note (GM steering).
+  narrator_note?: string | null;
+  narrator_note_depth?: number;
 }
 export interface TrustChange {
   npc: string;

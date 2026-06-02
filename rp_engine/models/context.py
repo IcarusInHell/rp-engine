@@ -15,6 +15,7 @@ from rp_engine.models.rp import GuidelinesResponse
 
 
 class ContextRequest(BaseModel):
+    """Request to build context for a turn — message, prior response, POV, NPC-reaction toggle."""
     user_message: str
     last_response: str | None = None
     include_npc_reactions: bool = True
@@ -22,6 +23,7 @@ class ContextRequest(BaseModel):
 
 
 class ContextDocument(BaseModel):
+    """A story card injected into context — match source, relevance score, and tiered injection depth."""
     name: str
     card_type: str
     file_path: str
@@ -39,6 +41,7 @@ class ContextDocument(BaseModel):
 
 
 class ContextReference(BaseModel):
+    """A card already loaded in a prior turn, referenced rather than re-sent."""
     name: str
     card_type: str
     status: Literal["already_loaded"] = "already_loaded"
@@ -46,6 +49,7 @@ class ContextReference(BaseModel):
 
 
 class NPCBrief(BaseModel):
+    """A deterministic behavioral brief for an active NPC — trust, state, and scene signals."""
     character: str
     card_id: str | None = None  # story_cards.id — used to dedup the NPC's card from documents
     importance: str | None = None
@@ -61,6 +65,7 @@ class NPCBrief(BaseModel):
 
 
 class FlaggedNPC(BaseModel):
+    """An NPC flagged as relevant but not given a full brief, with the reason."""
     character: str
     importance: str | None = None
     reason: str
@@ -85,6 +90,7 @@ class ResolvedKnowledge(BaseModel):
 
 
 class SceneState(BaseModel):
+    """The current scene — location, time of day, mood, and in-story timestamp."""
     location: str | None = None
     time_of_day: str | None = None
     mood: str | None = None
@@ -92,12 +98,14 @@ class SceneState(BaseModel):
 
 
 class CharacterState(BaseModel):
+    """A character's minimal live state — location, conditions, emotion."""
     location: str | None = None
     conditions: list[str] = []
     emotional_state: str | None = None
 
 
 class CustomStateBlock(BaseModel):
+    """A rendered custom-state block ready for prompt injection in its display format."""
     schema_name: str
     category: str
     display_format: str  # inject_as: "stat_block", "inventory_list", "note"
@@ -106,6 +114,7 @@ class CustomStateBlock(BaseModel):
 
 
 class ThreadAlert(BaseModel):
+    """A plot-thread alert — counter vs threshold, escalation level, and consequence."""
     thread_id: str
     name: str
     level: Literal["gentle", "moderate", "strong"]
@@ -116,6 +125,7 @@ class ThreadAlert(BaseModel):
 
 
 class TriggeredNote(BaseModel):
+    """A fired situational trigger's injected note or state alert."""
     trigger_id: str
     trigger_name: str
     inject_type: Literal["context_note", "state_alert"]
@@ -141,12 +151,14 @@ class LorebookEntryHit(BaseModel):
 
 
 class CardGap(BaseModel):
+    """A repeatedly-seen entity with no card yet — a suggested-card gap."""
     entity_name: str
     seen_count: int
     suggested_type: str | None = None
 
 
 class StalenessWarning(BaseModel):
+    """A warning that an exchange's async analysis failed, leaving stale fields."""
     type: str = "stale_analysis"
     exchange: int
     failed_at: str
@@ -154,6 +166,7 @@ class StalenessWarning(BaseModel):
 
 
 class WritingConstraints(BaseModel):
+    """Assembled writing-style constraints with the patterns included and token count."""
     text: str
     patterns_included: list[str] = []
     task_context: str = ""
@@ -161,6 +174,7 @@ class WritingConstraints(BaseModel):
 
 
 class PastExchangeHit(BaseModel):
+    """A semantically-retrieved past exchange — speaker, text, and relevance score."""
     exchange_number: int
     session_id: str | None = None
     speaker: str
@@ -170,6 +184,7 @@ class PastExchangeHit(BaseModel):
 
 
 class ExtractedMemoryHit(BaseModel):
+    """A retrieved extracted memory — description, significance, and characters."""
     description: str
     significance: str | None = None
     characters: list[str] = []
@@ -178,12 +193,14 @@ class ExtractedMemoryHit(BaseModel):
 
 
 class AutoSaveResult(BaseModel):
+    """Identifiers for an exchange saved by the auto-save path."""
     exchange_id: int
     exchange_number: int
     session_id: str
 
 
 class ContextResponse(BaseModel):
+    """The full assembled context for a turn — documents, NPC briefs/reactions, state, alerts, and retrieval hits."""
     current_exchange: int
     documents: list[ContextDocument] = []
     references: list[ContextReference] = []
@@ -212,6 +229,7 @@ class ContextResponse(BaseModel):
 
 
 class MatchedEntity(BaseModel):
+    """An entity matched in the user message — by name, alias, or keyword, with a score."""
     entity_id: str
     match_source: Literal["alias", "keyword", "name"]
     match_term: str
@@ -219,12 +237,14 @@ class MatchedEntity(BaseModel):
 
 
 class DetectedNPC(BaseModel):
+    """An NPC detected as active or referenced in the scene, with the detection reason."""
     entity_id: str
     name: str
     detection_reason: str
 
 
 class ExtractionResult(BaseModel):
+    """Entity-extraction output — matched entities, active/referenced NPCs, and locations."""
     matched_entities: list[MatchedEntity] = []
     active_npcs: list[DetectedNPC] = []
     referenced_npcs: list[DetectedNPC] = []
@@ -237,6 +257,7 @@ class ExtractionResult(BaseModel):
 
 
 class ResolveRequest(BaseModel):
+    """Request to resolve the relationship graph from a scene — keywords, hops, and result cap."""
     scene_description: str
     keywords: list[str] = []
     max_hops: int = 2

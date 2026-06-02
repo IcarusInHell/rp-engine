@@ -63,86 +63,107 @@ def get_services(request: Request) -> ServiceContainer:
 
 
 def get_db(request: Request) -> Database:
+    """FastAPI dependency — the Database (async SQLite + write queue)."""
     return _get(request, "db")
 
 
 def get_card_indexer(request: Request) -> CardIndexer:
+    """FastAPI dependency — the CardIndexer (story-card → SQLite indexing)."""
     return _get(request, "card_indexer")
 
 
 def get_card_authoring_service(request: Request) -> CardAuthoringService:
+    """FastAPI dependency — the CardAuthoringService (AI card suggest/generate/sync)."""
     return _get(request, "card_authoring_service")
 
 
 def get_vault_root(request: Request) -> Path:
+    """FastAPI dependency — the resolved Obsidian vault root path."""
     return _get(request, "vault_root")
 
 
 def get_entity_extractor(request: Request) -> EntityExtractor:
+    """FastAPI dependency — the EntityExtractor (Layer-A entity keyword matching)."""
     return _get(request, "entity_extractor")
 
 
 def get_scene_classifier(request: Request) -> SceneClassifier:
+    """FastAPI dependency — the SceneClassifier (pre-prompt scene-signal scoring)."""
     return _get(request, "scene_classifier")
 
 
 def get_graph_resolver(request: Request) -> GraphResolver:
+    """FastAPI dependency — the GraphResolver (entity-connection graph traversal)."""
     return _get(request, "graph_resolver")
 
 
 def get_vector_search(request: Request) -> VectorSearch:
+    """FastAPI dependency — the VectorSearch (SQLite vector + BM25 hybrid card search)."""
     return _get(request, "vector_search")
 
 
 def get_trigger_evaluator(request: Request) -> TriggerEvaluator:
+    """FastAPI dependency — the TriggerEvaluator (the single shared matcher for triggers + lorebook)."""
     return _get(request, "trigger_evaluator")
 
 
 def get_context_engine(request: Request) -> ContextEngine:
+    """FastAPI dependency — the ContextEngine (the main intelligence orchestrator)."""
     return _get(request, "context_engine")
 
 
 def get_knowledge_resolver(request: Request) -> KnowledgeResolver:
+    """FastAPI dependency — the KnowledgeResolver (knowledge-boundary refs ↔ beliefs)."""
     return _get(request, "knowledge_resolver")
 
 
 def get_lorebook_indexer(request: Request) -> LorebookIndexer:
+    """FastAPI dependency — the LorebookIndexer (file-drop World Info → cache)."""
     return _get(request, "lorebook_indexer")
 
 
 def get_lorebook_service(request: Request) -> LorebookService:
+    """FastAPI dependency — the LorebookService (World Info matching via the reused evaluator)."""
     return _get(request, "lorebook_service")
 
 
 def get_llm_client(request: Request) -> LLMClient:
+    """FastAPI dependency — the LLMClient (multi-provider chat/embed facade)."""
     return _get(request, "llm_client")
 
 
 def get_npc_engine(request: Request) -> NPCEngine:
+    """FastAPI dependency — the NPCEngine (NPC reactions + trust + briefs)."""
     return _get(request, "npc_engine")
 
 
 def get_ancestry_resolver(request: Request) -> AncestryResolver:
+    """FastAPI dependency — the AncestryResolver (branch-ancestry SQL/LanceDB filters)."""
     return _get(request, "ancestry_resolver")
 
 
 def get_state_manager(request: Request) -> StateManager:
+    """FastAPI dependency — the StateManager (facade over the state/ domain services)."""
     return _get(request, "state_manager")
 
 
 def get_thread_tracker(request: Request) -> ThreadTracker:
+    """FastAPI dependency — the ThreadTracker (plot-thread counters + alerts)."""
     return _get(request, "thread_tracker")
 
 
 def get_timestamp_tracker(request: Request) -> TimestampTracker:
+    """FastAPI dependency — the TimestampTracker (in-story clock advancement)."""
     return _get(request, "timestamp_tracker")
 
 
 def get_response_analyzer(request: Request) -> ResponseAnalyzer:
+    """FastAPI dependency — the ResponseAnalyzer (LLM post-response extraction)."""
     return _get(request, "response_analyzer")
 
 
 def get_analysis_pipeline(request: Request) -> AnalysisPipeline | None:
+    """FastAPI dependency — the AnalysisPipeline, or None if not initialized."""
     container = getattr(request.app.state, "services", None)
     if container is not None:
         return getattr(container, "analysis_pipeline", None)
@@ -150,22 +171,27 @@ def get_analysis_pipeline(request: Request) -> AnalysisPipeline | None:
 
 
 def get_exchange_writer(request: Request) -> ExchangeWriter:
+    """FastAPI dependency — the ExchangeWriter (centralized exchange persistence)."""
     return _get(request, "exchange_writer")
 
 
 def get_rewind_service(request: Request) -> RewindService:
+    """FastAPI dependency — the RewindService (rewind-to-exchange branch fork)."""
     return _get(request, "rewind_service")
 
 
 def get_exchange_search_service(request: Request) -> ExchangeSearchService:
+    """FastAPI dependency — the ExchangeSearchService (semantic/keyword/hybrid history search)."""
     return _get(request, "exchange_search_service")
 
 
 def get_branch_manager(request: Request) -> BranchManager:
+    """FastAPI dependency — the BranchManager (branch CRUD + CoW snapshots + ancestry)."""
     return _get(request, "branch_manager")
 
 
 def get_auto_save_manager(request: Request) -> AutoSaveManager | None:
+    """FastAPI dependency — the AutoSaveManager (deprecated auto-save path), or None if absent."""
     container = getattr(request.app.state, "services", None)
     if container is not None:
         return getattr(container, "auto_save_manager", None)
@@ -181,30 +207,37 @@ def get_lance_store(request: Request):
 
 
 def get_custom_state_manager(request: Request) -> CustomStateManager:
+    """FastAPI dependency — the CustomStateManager (custom tracked-field state)."""
     return _get(request, "custom_state_manager")
 
 
 def get_guidelines_service(request: Request) -> GuidelinesService:
+    """FastAPI dependency — the GuidelinesService (Story_Guidelines.md frontmatter)."""
     return _get(request, "guidelines_service")
 
 
 def get_npc_brief_builder(request: Request) -> NPCBriefBuilder:
+    """FastAPI dependency — the NPCBriefBuilder (deterministic NPC behavioral briefs)."""
     return _get(request, "npc_brief_builder")
 
 
 def get_prompt_assembler(request: Request) -> PromptAssembler:
+    """FastAPI dependency — the PromptAssembler (system-prompt + history assembly)."""
     return _get(request, "prompt_assembler")
 
 
 def get_summary_builder(request: Request) -> SummaryBuilder:
+    """FastAPI dependency — the SummaryBuilder (LLM session summaries)."""
     return _get(request, "summary_builder")
 
 
 def get_recap_builder(request: Request) -> RecapBuilder:
+    """FastAPI dependency — the RecapBuilder ('Previously on…' recaps)."""
     return _get(request, "recap_builder")
 
 
 def get_chat_manager(request: Request) -> ChatManager:
+    """FastAPI dependency — the ChatManager (the chat pipeline orchestrator)."""
     return _get(request, "chat_manager")
 
 
@@ -217,6 +250,7 @@ def get_continuity_checker(request: Request):
 
 
 def get_diagnostic_logger(request: Request) -> DiagnosticLogger:
+    """FastAPI dependency — the DiagnosticLogger (structured JSONL diagnostics)."""
     return _get(request, "diagnostic_logger")
 
 

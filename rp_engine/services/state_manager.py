@@ -69,6 +69,7 @@ class StateManager:
 
     @diagnostic_logger.setter
     def diagnostic_logger(self, value) -> None:
+        """Forward the diagnostic logger to the relationship domain (the only sub-service that emits diagnostics)."""
         self._diagnostic_logger = value
         # Only the relationship domain emits diagnostics today (trust updates).
         self.relationships.diagnostic_logger = value

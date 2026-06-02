@@ -27,6 +27,7 @@ from rp_engine.models.context import (
     SceneState,
 )
 from rp_engine.services.context_engine import ContextEngine
+from rp_engine.services.diagnostic_logger import DiagnosticLogger
 from rp_engine.services.exchange_writer import ExchangeWriter
 from rp_engine.services.llm_client import LLMClient
 from rp_engine.services.prompt_assembler import PromptAssembler
@@ -36,6 +37,7 @@ from rp_engine.utils.direction import (
     build_ooc_message,
     parse_direction_markers,
 )
+from rp_engine.utils.provenance import collecting
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,10 @@ class ChatManager:
         self.prompt_assembler = prompt_assembler
         self.llm_client = llm_client
         self.exchange_writer = exchange_writer
+        # Late-bound by the container (attribute injection), like the other
+        # diagnostic-logger consumers. None when unset (e.g. in tests) → the
+        # provenance drop-ledger silently no-ops.
+        self.diagnostic_logger: DiagnosticLogger | None = None
 
     @property
     def _chat_config(self) -> ChatConfig:
@@ -529,30 +535,40 @@ class ChatManager:
         scene_override: SceneOverride | None = None,
         exclude_exchange_number: int | None = None,
     ) -> list[dict]:
-        """Run context pipeline and build prompt messages."""
-        request = ContextRequest(
-            user_message=user_message,
-            include_npc_reactions=False,
-        )
-        context_response = await self.context_engine.get_context(
-            request=request,
-            rp_folder=rp_folder,
-            branch=branch,
-            session_id=session_id,
-        )
+        """Run context pipeline and build prompt messages.
 
-        await self._apply_context_overrides(
-            context_response, attach_card_ids, scene_override, rp_folder,
-        )
+        The whole assembly runs inside ``collecting()`` so the provenance drop-ledger
+        captures every swallow-point in this request's task; the report is flushed
+        through the diagnostic logger on exit (no-op when diagnostics is disabled or
+        the logger is unset).
+        """
+        sink = self.diagnostic_logger.log if self.diagnostic_logger is not None else None
+        with collecting(
+            sink=sink, rp_folder=rp_folder, branch=branch, session_id=session_id,
+        ):
+            request = ContextRequest(
+                user_message=user_message,
+                include_npc_reactions=False,
+            )
+            context_response = await self.context_engine.get_context(
+                request=request,
+                rp_folder=rp_folder,
+                branch=branch,
+                session_id=session_id,
+            )
 
-        return await self.prompt_assembler.build_messages(
-            rp_folder=rp_folder,
-            branch=branch,
-            user_message=user_message,
-            context_response=context_response,
-            session_id=session_id,
-            exclude_exchange_number=exclude_exchange_number,
-        )
+            await self._apply_context_overrides(
+                context_response, attach_card_ids, scene_override, rp_folder,
+            )
+
+            return await self.prompt_assembler.build_messages(
+                rp_folder=rp_folder,
+                branch=branch,
+                user_message=user_message,
+                context_response=context_response,
+                session_id=session_id,
+                exclude_exchange_number=exclude_exchange_number,
+            )
 
     async def _apply_context_overrides(
         self,

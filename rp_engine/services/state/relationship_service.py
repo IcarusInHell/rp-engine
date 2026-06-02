@@ -24,6 +24,7 @@ from rp_engine.models.state import (
 from rp_engine.services.ancestry_resolver import AncestryResolver
 from rp_engine.services.state.character_service import CharacterService
 from rp_engine.utils.json_helpers import safe_parse_json, safe_parse_json_list
+from rp_engine.utils.normalization import make_entity_id
 from rp_engine.utils.state_helpers import resolve_exchange_number
 from rp_engine.utils.trust import trust_stage
 
@@ -144,7 +145,12 @@ class RelationshipService:
             for m in mods
         ]
 
-        # Load relationship dynamic (role) from entity_connections
+        # Load relationship dynamic (role) from entity_connections.
+        # entity_connections endpoints are stored as "rp_folder:normalize_key(name)",
+        # NOT bare names — build the lookup keys the same way (else this silently
+        # misses and dynamic is always None). See utils.normalization.make_entity_id.
+        key_a = make_entity_id(rp_folder, char_a)
+        key_b = make_entity_id(rp_folder, char_b)
         dynamic_row = await self.db.fetch_one(
             """SELECT role FROM entity_connections
                WHERE connection_type = 'has_relationship'
@@ -152,7 +158,7 @@ class RelationshipService:
                    OR (LOWER(from_entity) = LOWER(?) AND LOWER(to_entity) = LOWER(?)))
                  AND role IS NOT NULL
                LIMIT 1""",
-            [char_a, char_b, char_b, char_a],
+            [key_a, key_b, key_b, key_a],
         )
 
         return RelationshipDetail(
@@ -230,9 +236,13 @@ class RelationshipService:
             mod_sum = mod_map.get(pair, 0)
             live = baseline + mod_sum
 
-            # Look up dynamic from either direction
-            a_lower, b_lower = pair[0].lower(), pair[1].lower()
-            dynamic = role_map.get((a_lower, b_lower)) or role_map.get((b_lower, a_lower))
+            # Look up dynamic from either direction. role_map keys are the stored
+            # entity_connections endpoints ("rp_folder:normalize_key(name)") fully
+            # lowercased, so build the lookup key the same way — a bare name never
+            # matches the "folder:key" rows (the relationship-role silent drop).
+            a_key = make_entity_id(rp_folder, pair[0]).lower()
+            b_key = make_entity_id(rp_folder, pair[1]).lower()
+            dynamic = role_map.get((a_key, b_key)) or role_map.get((b_key, a_key))
 
             results.append(RelationshipDetail(
                 character_a=br["character_a"],

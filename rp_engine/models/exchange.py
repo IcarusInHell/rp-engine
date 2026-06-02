@@ -20,6 +20,7 @@ def validate_response_content(v: str) -> str:
 
 
 class ExchangeSave(BaseModel):
+    """Request to save an exchange — user message + assistant response (meta content rejected)."""
     user_message: str
     assistant_response: str
     exchange_number: int | None = None
@@ -58,6 +59,7 @@ class ExchangeUpdate(BaseModel):
 
 
 class ExchangeResponse(BaseModel):
+    """Result of saving an exchange — id, number, and async analysis status."""
     id: int
     exchange_number: int
     session_id: str
@@ -75,6 +77,7 @@ class DeleteResponse(BaseModel):
 
 
 class ExchangeDetail(BaseModel):
+    """A full stored exchange with state, variant, bookmark, and annotation metadata."""
     id: int
     exchange_number: int
     session_id: str
@@ -98,6 +101,7 @@ class ExchangeDetail(BaseModel):
 
 
 class ExchangeListResponse(BaseModel):
+    """A page of exchanges with a total count."""
     exchanges: list[ExchangeDetail]
     total_count: int
 
@@ -105,12 +109,14 @@ class ExchangeListResponse(BaseModel):
 # --- Search ---
 
 class SearchMode(StrEnum):
+    """Exchange search modes — semantic, keyword, or hybrid."""
     semantic = "semantic"
     keyword = "keyword"
     hybrid = "hybrid"
 
 
 class ExchangeSearchHit(BaseModel):
+    """One search hit — snippets, relevance score, and exchange metadata."""
     exchange_number: int
     exchange_id: int
     user_message_snippet: str
@@ -125,6 +131,7 @@ class ExchangeSearchHit(BaseModel):
 
 
 class ExchangeSearchResponse(BaseModel):
+    """Exchange search results for a query in a given mode."""
     query: str
     mode: str
     total_results: int
@@ -134,18 +141,21 @@ class ExchangeSearchResponse(BaseModel):
 # --- Bookmarks ---
 
 class BookmarkCreate(BaseModel):
+    """Request to bookmark an exchange — optional name, note, and color."""
     name: str | None = None
     note: str | None = None
     color: str = "default"
 
 
 class BookmarkUpdate(BaseModel):
+    """Partial update to a bookmark (all fields optional)."""
     name: str | None = None
     note: str | None = None
     color: str | None = None
 
 
 class BookmarkResponse(BaseModel):
+    """A stored bookmark on an exchange."""
     id: int
     exchange_number: int
     exchange_id: int
@@ -156,6 +166,7 @@ class BookmarkResponse(BaseModel):
 
 
 class BookmarkListResponse(BaseModel):
+    """All bookmarks with a total count."""
     bookmarks: list[BookmarkResponse]
     total_count: int
 
@@ -163,18 +174,21 @@ class BookmarkListResponse(BaseModel):
 # --- Annotations ---
 
 class AnnotationCreate(BaseModel):
+    """Request to annotate an exchange — content, type, and context-inclusion flag."""
     content: str
     annotation_type: str = "note"
     include_in_context: bool = False
 
 
 class AnnotationUpdate(BaseModel):
+    """Partial update to an annotation (all fields optional)."""
     content: str | None = None
     annotation_type: str | None = None
     include_in_context: bool | None = None
 
 
 class AnnotationResponse(BaseModel):
+    """A stored annotation on an exchange."""
     id: int
     exchange_number: int
     exchange_id: int
@@ -187,5 +201,6 @@ class AnnotationResponse(BaseModel):
 
 
 class AnnotationListResponse(BaseModel):
+    """All annotations with a total count."""
     annotations: list[AnnotationResponse]
     total_count: int

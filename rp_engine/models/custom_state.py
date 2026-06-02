@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 
 class CustomStateSchema(BaseModel):
+    """Definition of a custom state field — data type, scope (scene vs per-character), and injection format."""
     id: str
     rp_folder: str | None = None
     category: str
@@ -20,6 +21,7 @@ class CustomStateSchema(BaseModel):
 
 
 class CustomStateSchemaCreate(BaseModel):
+    """Create payload for a custom state schema — rp_folder is required here."""
     id: str
     rp_folder: str
     category: str
@@ -32,6 +34,7 @@ class CustomStateSchemaCreate(BaseModel):
 
 
 class CustomStateValue(BaseModel):
+    """A recorded value for a custom state field, with provenance (who/when/why)."""
     schema_id: str
     entity_id: str | None = None
     value: str | dict | list | int | float | None = None
@@ -41,6 +44,7 @@ class CustomStateValue(BaseModel):
 
 
 class CustomStateSet(BaseModel):
+    """Request to set a custom state value on a branch."""
     schema_id: str
     rp_folder: str
     branch: str = "main"
@@ -50,6 +54,7 @@ class CustomStateSet(BaseModel):
 
 
 class PresetInfo(BaseModel):
+    """Summary of a custom-state preset — name, description, and schema count."""
     name: str
     description: str | None = None
     schema_count: int = 0
@@ -62,6 +67,7 @@ class CustomStateSnapshot(BaseModel):
 
 
 class PCCustomStateItem(BaseModel):
+    """One player-character custom state value with its display format."""
     schema_id: str
     category: str
     name: str
@@ -71,6 +77,7 @@ class PCCustomStateItem(BaseModel):
 
 
 class PCStateResponse(BaseModel):
+    """A player character's full current state — location, emotion, conditions, and custom fields."""
     character: str
     location: str | None = None
     emotional_state: str | None = None

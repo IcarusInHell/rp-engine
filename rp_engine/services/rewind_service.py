@@ -28,6 +28,8 @@ class RewindResult:
 
 
 class RewindService:
+    """Rewind-via-branch-fork — forks a new branch at ``exchange_number − 1`` so a conflicting save lands there (append-only, never deletes)."""
+
     def __init__(self, db: Database, branch_manager: BranchManager):
         self.db = db
         self.branch_manager = branch_manager

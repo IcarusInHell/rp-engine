@@ -12,6 +12,7 @@ from rp_engine.models.context import SceneState
 
 
 class CharacterDetail(BaseModel):
+    """A character's current resolved state — location, conditions, emotion, and archetypes."""
     name: str
     card_path: str | None = None
     is_player_character: bool = False
@@ -27,6 +28,7 @@ class CharacterDetail(BaseModel):
 
 
 class CharacterUpdate(BaseModel):
+    """Partial update to a character's state (location, conditions, emotion, last-seen)."""
     location: str | None = None
     conditions: list[str] | None = None
     emotional_state: str | None = None
@@ -34,6 +36,7 @@ class CharacterUpdate(BaseModel):
 
 
 class CharacterListResponse(BaseModel):
+    """All characters in an RP keyed by name."""
     characters: dict[str, CharacterDetail]
 
 
@@ -43,6 +46,7 @@ class CharacterListResponse(BaseModel):
 
 
 class TrustModification(BaseModel):
+    """A single trust ledger delta — change, direction, and the exchange it came from."""
     date: str | None = None
     change: int
     direction: str
@@ -53,6 +57,7 @@ class TrustModification(BaseModel):
 
 
 class RelationshipDetail(BaseModel):
+    """Directional trust from character_a to character_b — baseline, live score, stage, and dynamic role."""
     character_a: str
     character_b: str
     initial_trust_score: int = 0
@@ -64,6 +69,7 @@ class RelationshipDetail(BaseModel):
 
 
 class RelationshipUpdate(BaseModel):
+    """Request to apply a directional trust change with a reason."""
     trust_change: int
     reason: str
     direction: str = "neutral"
@@ -71,6 +77,7 @@ class RelationshipUpdate(BaseModel):
 
 
 class RelationshipListResponse(BaseModel):
+    """All relationships in an RP."""
     relationships: list[RelationshipDetail]
 
 
@@ -80,6 +87,7 @@ class RelationshipListResponse(BaseModel):
 
 
 class SceneUpdate(BaseModel):
+    """Partial update to the current scene (location, time, mood, timestamp)."""
     location: str | None = None
     time_of_day: str | None = None
     mood: str | None = None
@@ -92,6 +100,7 @@ class SceneUpdate(BaseModel):
 
 
 class EventDetail(BaseModel):
+    """A recorded story event — description, characters, and significance."""
     id: int
     in_story_timestamp: str | None = None
     event: str
@@ -102,6 +111,7 @@ class EventDetail(BaseModel):
 
 
 class EventCreate(BaseModel):
+    """Request to record a story event."""
     event: str
     characters: list[str] = []
     significance: str = "medium"
@@ -109,6 +119,7 @@ class EventCreate(BaseModel):
 
 
 class EventListResponse(BaseModel):
+    """All events in an RP."""
     events: list[EventDetail]
 
 
@@ -118,6 +129,7 @@ class EventListResponse(BaseModel):
 
 
 class StateSnapshot(BaseModel):
+    """A full state snapshot — characters, relationships, scene, events, and session."""
     characters: dict[str, CharacterDetail] = {}
     relationships: list[RelationshipDetail] = []
     scene: SceneState = SceneState()
@@ -132,6 +144,7 @@ class StateSnapshot(BaseModel):
 
 
 class RelGraphNode(BaseModel):
+    """A character node in the relationship graph — identity plus current state."""
     name: str
     is_player_character: bool = False
     importance: str | None = None
@@ -143,6 +156,7 @@ class RelGraphNode(BaseModel):
 
 
 class RelGraphEdge(BaseModel):
+    """A directional trust edge in the relationship graph (from_char → to_char)."""
     from_char: str
     to_char: str
     trust_score: int = 0
@@ -153,11 +167,13 @@ class RelGraphEdge(BaseModel):
 
 
 class RelGraphMetadata(BaseModel):
+    """Summary counts for a relationship graph."""
     total_npcs: int = 0
     total_edges: int = 0
 
 
 class RelationshipGraphResponse(BaseModel):
+    """A full relationship graph — nodes, directional edges, and metadata."""
     nodes: list[RelGraphNode]
     edges: list[RelGraphEdge]
     metadata: RelGraphMetadata

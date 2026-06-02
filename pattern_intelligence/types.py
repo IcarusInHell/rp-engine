@@ -11,6 +11,8 @@ from typing import Any, Optional, Protocol
 
 
 class Direction(str, Enum):
+    """Pattern direction — whether the learned pattern is something to AVOID or to PREFER."""
+
     AVOID = "avoid"
     PREFER = "prefer"
 
@@ -26,6 +28,8 @@ class SignatureProtocol(Protocol):
 
 @dataclass
 class CorrectionPair:
+    """A before/after example tied to a pattern — original excerpt, user revision, and token counts for budget-aware example selection."""
+
     id: str
     pattern_id: str
     original: str

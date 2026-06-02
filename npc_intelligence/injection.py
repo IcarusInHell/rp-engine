@@ -7,6 +7,7 @@ from .types import BehavioralSignature, InjectionPayload, ScoredPattern
 
 
 class BehavioralInjectionFormatter(BaseInjectionFormatter):
+    """Formats scored patterns into the `[NPC BEHAVIORAL CONSTRAINTS]` prompt block — token-budgeted, with an archetype/trust/modifier/scene header."""
 
     def __init__(self, token_budget: int = 500,
                  count_tokens: Optional[Callable[[str], int]] = None):
@@ -15,6 +16,7 @@ class BehavioralInjectionFormatter(BaseInjectionFormatter):
     def format(self, scored_patterns: list[ScoredPattern],
                behavioral_sig: BehavioralSignature,
                npc_name: str = "") -> InjectionPayload:
+        """Format scored patterns into an InjectionPayload, wrapping the base formatter's text/token/id triple with the behavioral signature and NPC name."""
         full_text, actual_tokens, included_ids = super().format(
             scored_patterns, behavioral_sig, npc_name=npc_name)
         return InjectionPayload(

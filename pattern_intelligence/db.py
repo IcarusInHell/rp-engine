@@ -111,6 +111,7 @@ class BasePatternDB:
     # --- Pattern CRUD ---
 
     def insert_pattern(self, pattern: Pattern) -> str:
+        """Insert a pattern row; returns its id."""
         self.conn.execute(
             """INSERT INTO patterns
                (id, category, subcategory, description, direction, severity,
@@ -138,6 +139,7 @@ class BasePatternDB:
         return pattern.id
 
     def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
+        """Fetch a pattern by id (with its correction pairs), or None."""
         row = self.conn.execute(
             "SELECT * FROM patterns WHERE id = ?", (pattern_id,)
         ).fetchone()
@@ -148,6 +150,7 @@ class BasePatternDB:
         return pattern
 
     def update_pattern(self, pattern: Pattern) -> None:
+        """Persist mutable pattern fields (severity/frequency/correction count/proficiency/triggers/rule/timestamps)."""
         self.conn.execute(
             """UPDATE patterns SET
                severity = ?, frequency = ?, correction_count = ?,
@@ -169,10 +172,12 @@ class BasePatternDB:
         self.conn.commit()
 
     def get_all_patterns(self) -> list[Pattern]:
+        """Return every pattern row (without correction pairs)."""
         rows = self.conn.execute("SELECT * FROM patterns").fetchall()
         return [self._row_to_pattern(row) for row in rows]
 
     def get_patterns_by_triggers(self, trigger_values: set[str]) -> list[Pattern]:
+        """Return patterns whose context_triggers intersect the given trigger-value set (with correction pairs)."""
         rows = self.conn.execute("SELECT * FROM patterns").fetchall()
         matched = []
         for row in rows:
@@ -189,6 +194,7 @@ class BasePatternDB:
     def find_pattern_by_category_subcategory(
         self, category: str, subcategory: str
     ) -> Optional[Pattern]:
+        """Find a single pattern by exact (category, subcategory), or None — used for match-or-create."""
         row = self.conn.execute(
             "SELECT * FROM patterns WHERE category = ? AND subcategory = ?",
             (category, subcategory),
@@ -200,6 +206,7 @@ class BasePatternDB:
     # --- Correction Pairs ---
 
     def insert_correction_pair(self, pair: CorrectionPair) -> str:
+        """Insert a correction pair (before/after example) for a pattern; returns its id."""
         self.conn.execute(
             """INSERT INTO correction_pairs
                (id, pattern_id, original, revised, critique, extracted_rule,
@@ -221,6 +228,7 @@ class BasePatternDB:
         return pair.id
 
     def get_correction_pairs(self, pattern_id: str) -> list[CorrectionPair]:
+        """Return all correction pairs for a pattern."""
         rows = self.conn.execute(
             "SELECT * FROM correction_pairs WHERE pattern_id = ?",
             (pattern_id,),
@@ -232,6 +240,7 @@ class BasePatternDB:
     def log_feedback(
         self, feedback: FeedbackInput, pattern_ids: list[str]
     ) -> str:
+        """Record a raw feedback submission to feedback_log; returns the log id."""
         feedback_id = str(uuid.uuid4())
         self.conn.execute(
             """INSERT INTO feedback_log
@@ -262,6 +271,7 @@ class BasePatternDB:
         self, session_id: str, signature: Any,
         pattern_ids: list[str], output_text: str
     ) -> str:
+        """Record an injected output (serialized signature + injected pattern ids) to output_log; returns the output id."""
         output_id = str(uuid.uuid4())
         sig_dict = self._serialize_signature(signature)
         self.conn.execute(
@@ -282,6 +292,7 @@ class BasePatternDB:
         return output_id
 
     def mark_output_accepted(self, output_id: str) -> None:
+        """Mark a logged output as accepted by the user."""
         self.conn.execute(
             "UPDATE output_log SET user_accepted = 1 WHERE id = ?",
             (output_id,),
@@ -291,6 +302,7 @@ class BasePatternDB:
     def mark_output_corrected(
         self, output_id: str, corrected_pattern_ids: list[str]
     ) -> None:
+        """Mark a logged output as corrected, recording which pattern ids were corrected."""
         self.conn.execute(
             """UPDATE output_log SET user_accepted = 0,
                corrections_made = ? WHERE id = ?""",
@@ -301,6 +313,7 @@ class BasePatternDB:
     # --- Sessions ---
 
     def create_session(self) -> str:
+        """Open a new pattern-learning session row; returns its id."""
         session_id = str(uuid.uuid4())
         self.conn.execute(
             "INSERT INTO sessions (id, started_at) VALUES (?, ?)",
@@ -313,6 +326,7 @@ class BasePatternDB:
         self, session_id: str, exchanges: int,
         patterns_active: int, avg_proficiency: float
     ) -> None:
+        """Close a session, recording exchange count, active-pattern count, and average proficiency."""
         self.conn.execute(
             """UPDATE sessions SET ended_at = ?, exchanges = ?,
                patterns_active = ?, avg_proficiency = ? WHERE id = ?""",
@@ -329,6 +343,7 @@ class BasePatternDB:
     # --- Utility ---
 
     def close(self) -> None:
+        """Close the underlying SQLite connection."""
         self.conn.close()
 
     def _row_to_pattern(self, row: sqlite3.Row) -> Pattern:

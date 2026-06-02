@@ -32,6 +32,7 @@ async def list_schemas(
     rp_folder: str = Query(...),
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """List custom state schemas (tracked-field definitions) for an RP."""
     return await mgr.list_schemas(rp_folder)
 
 
@@ -40,6 +41,7 @@ async def create_schema(
     body: CustomStateSchemaCreate,
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """Create a custom state schema (define a new tracked field)."""
     schema = CustomStateSchema(**body.model_dump())
     return await mgr.create_schema(schema, body.rp_folder)
 
@@ -50,6 +52,7 @@ async def delete_schema(
     rp_folder: str = Query(...),
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """Delete a custom state schema by id."""
     await mgr.delete_schema(schema_id, rp_folder)
     return {"deleted": True}
 
@@ -60,6 +63,7 @@ async def get_all_state(
     branch: str = Query("main"),
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """Return a snapshot of all custom state values for an RP/branch."""
     return await mgr.get_snapshot(rp_folder, branch)
 
 
@@ -71,6 +75,7 @@ async def get_value(
     entity_id: str | None = Query(None),
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """Get the current value of one custom state field (optionally entity-scoped)."""
     return await mgr.get_value(schema_id, rp_folder, branch, entity_id)
 
 
@@ -80,6 +85,7 @@ async def set_value(
     body: CustomStateSet,
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """Set a custom state field's value, recording the change reason."""
     return await mgr.set_value(
         schema_id=schema_id,
         value=body.value,
@@ -131,6 +137,7 @@ async def get_pc_state(
 async def list_presets(
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """List available custom-state presets (predefined schema bundles)."""
     return mgr.list_presets()
 
 
@@ -140,6 +147,7 @@ async def apply_preset(
     rp_folder: str = Query(...),
     mgr: CustomStateManager = Depends(get_custom_state_manager),
 ):
+    """Apply a named preset, creating its schemas for the RP."""
     try:
         return await mgr.apply_preset(preset_name, rp_folder)
     except ValueError as e:

@@ -24,6 +24,8 @@ _ENV_PATH = PROJECT_ROOT / ".env"
 
 
 class ConfigResponse(BaseModel):
+    """Full app-config view with secrets masked — one dict per config section (server/paths/llm/chat/context/search/trust/diagnostics/rp/prompt)."""
+
     server: dict
     paths: dict
     llm: dict
@@ -33,18 +35,25 @@ class ConfigResponse(BaseModel):
     trust: dict
     diagnostics: dict
     rp: dict
+    prompt: dict = {}
 
 
 class ActiveRPResponse(BaseModel):
+    """Auto-save status — whether auto-save is active plus the current open-session count."""
+
     active_rp: bool
     session_count: int
 
 
 class ActiveRPToggle(BaseModel):
+    """Request body to enable or disable auto-save for RP exchanges."""
+
     enabled: bool
 
 
 class ConfigUpdate(BaseModel):
+    """Partial config-update body — non-secret sections merge into config.yaml; `openrouter_api_key` is written to .env only, never config.yaml."""
+
     server: dict | None = None
     paths: dict | None = None
     llm: dict | None = None
@@ -54,6 +63,10 @@ class ConfigUpdate(BaseModel):
     trust: dict | None = None
     diagnostics: dict | None = None
     rp: dict | None = None
+    # Phase 6: global prompt config (token_budget / example_dialogue / injection
+    # defaults / trigger_stemming). Per-RP overrides live in Story_Guidelines.md;
+    # these are the machine-global defaults.
+    prompt: dict | None = None
     # Secret fields — written to .env only, never to config.yaml
     openrouter_api_key: str | None = None
 
@@ -73,6 +86,7 @@ def _config_to_dict(cfg: RPEngineConfig) -> dict:
         "trust": cfg.trust.model_dump(),
         "diagnostics": cfg.diagnostics.model_dump(),
         "rp": cfg.rp.model_dump(),
+        "prompt": cfg.prompt.model_dump(),
     }
 
 
@@ -146,6 +160,7 @@ async def update_config(
             "trust": body.trust,
             "diagnostics": body.diagnostics,
             "rp": body.rp,
+            "prompt": body.prompt,
         }
         for section, updates in section_map.items():
             if updates is not None:
@@ -224,6 +239,8 @@ async def set_active_rp(
 
 
 class ProviderTestResult(BaseModel):
+    """Result of an LLM-provider connectivity ping — ok/error status with optional latency and error detail."""
+
     provider: str
     status: str  # "ok" | "error"
     latency_ms: float | None = None

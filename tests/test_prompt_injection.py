@@ -402,6 +402,91 @@ async def test_example_dialogue_skips_player_character(seeded_rp):
 
 
 # ---------------------------------------------------------------------------
+# Feature D — example dialogue token-budget coupling (corrections plan B1)
+# ---------------------------------------------------------------------------
+
+
+async def test_example_dialogue_drawn_from_reserve_and_dropped(seeded_rp, caplog):
+    """B1: with token budget on and the `reserve` allocation too small to hold the
+    parsed examples, example pairs are dropped (oldest first) and the drop is
+    logged. RED on pre-B1 code, which kept examples regardless of the budget."""
+    import logging
+    container = seeded_rp.container
+    await _insert_card(
+        container.db, card_id=f"{RP_FOLDER}:dante_reserve", name="DanteReserve",
+        content=_EXAMPLE_BODY, frontmatter={"is_player_character": False},
+    )
+    cr = ContextResponse(
+        current_exchange=4,
+        npc_briefs=[NPCBrief(character="Dante", card_id=f"{RP_FOLDER}:dante_reserve", trust_stage="neutral")],
+    )
+    # window 4510 → total budget 10 tok → reserve = 5% = 0 → no example pair fits.
+    cfg = PromptConfig(
+        token_budget=TokenBudgetConfig(enabled=True, model_context_window=4510),
+        example_dialogue=ExampleDialogueConfig(enabled=True, pin_examples=False),
+    )
+    with caplog.at_level(logging.WARNING):
+        messages = await _assembler_with(container, cfg).build_messages(
+            seeded_rp.rp_folder, "main", "now", context_response=cr, session_id=None,
+        )
+    assert not any(m.get("content") == "Who are you?" for m in messages), (
+        "example pair exceeding the reserve budget must be dropped"
+    )
+    assert any("reserve budget" in r.message for r in caplog.records), (
+        "example-dialogue budget drop must be logged (silent-drop guard)"
+    )
+
+
+async def test_pin_examples_overrides_reserve_drop(seeded_rp):
+    """B1 positive control: pin_examples=True keeps examples even when reserve is
+    too small. Paired with the drop test, this proves the drop is conditional on
+    pinning (the discriminator the un-pinned run would otherwise hide)."""
+    container = seeded_rp.container
+    await _insert_card(
+        container.db, card_id=f"{RP_FOLDER}:dante_pin", name="DantePin",
+        content=_EXAMPLE_BODY, frontmatter={"is_player_character": False},
+    )
+    cr = ContextResponse(
+        current_exchange=4,
+        npc_briefs=[NPCBrief(character="Dante", card_id=f"{RP_FOLDER}:dante_pin", trust_stage="neutral")],
+    )
+    cfg = PromptConfig(
+        token_budget=TokenBudgetConfig(enabled=True, model_context_window=4510),
+        example_dialogue=ExampleDialogueConfig(enabled=True, pin_examples=True),
+    )
+    messages = await _assembler_with(container, cfg).build_messages(
+        seeded_rp.rp_folder, "main", "now", context_response=cr, session_id=None,
+    )
+    assert any(m.get("content") == "Who are you?" for m in messages), (
+        "pin_examples=True must keep examples regardless of the reserve budget"
+    )
+
+
+async def test_examples_kept_when_reserve_ample(seeded_rp):
+    """B1 no-over-drop control: a generous reserve keeps examples (the coupling
+    only drops under genuine pressure)."""
+    container = seeded_rp.container
+    await _insert_card(
+        container.db, card_id=f"{RP_FOLDER}:dante_ample", name="DanteAmple",
+        content=_EXAMPLE_BODY, frontmatter={"is_player_character": False},
+    )
+    cr = ContextResponse(
+        current_exchange=4,
+        npc_briefs=[NPCBrief(character="Dante", card_id=f"{RP_FOLDER}:dante_ample", trust_stage="neutral")],
+    )
+    cfg = PromptConfig(
+        token_budget=TokenBudgetConfig(enabled=True, model_context_window=128000),
+        example_dialogue=ExampleDialogueConfig(enabled=True, pin_examples=False),
+    )
+    messages = await _assembler_with(container, cfg).build_messages(
+        seeded_rp.rp_folder, "main", "now", context_response=cr, session_id=None,
+    )
+    assert any(m.get("content") == "Who are you?" for m in messages), (
+        "examples must be kept when the reserve budget is ample"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Config defaults
 # ---------------------------------------------------------------------------
 

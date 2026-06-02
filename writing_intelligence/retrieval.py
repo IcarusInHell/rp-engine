@@ -11,6 +11,7 @@ class PatternRetriever(BasePatternRetriever):
         super().__init__(db, recency_window_days)
 
     def retrieve(self, task_sig: TaskSignature, max_results: int = 20) -> list[ScoredPattern]:
+        """Fetch and score patterns whose triggers overlap the signature's flattened dimension values, returning the top `max_results` ScoredPatterns."""
         trigger_values = task_sig.all_trigger_values()
         patterns = self.db.get_patterns_by_triggers(trigger_values)
         scored_dicts = self._score_patterns(patterns, trigger_values)

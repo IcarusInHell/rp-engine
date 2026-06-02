@@ -61,6 +61,17 @@ def test_double_s_words_are_not_truncated():
     assert stem("kiss") == "kiss"
 
 
+def test_universe_is_a_known_accepted_over_stem():
+    # The conservative stemmer DOES strip the silent-e of "universe" → "univers".
+    # This is a KNOWN, ACCEPTED over-stem, locked here as a documented property
+    # rather than a guard that it stays whole (the Phase-0 plan's aspirational
+    # "universe over-stem guard" would have FAILED — see roadmap Phase 7 triage).
+    # It is harmless for matching: it only collides if an author needs "universe"
+    # and "univers" to be DISTINCT keywords, which never occurs in practice. The
+    # `-ss` words above survive (via _NATURAL_DOUBLES); silent-e stripping does not.
+    assert stem("universe") == "univers"
+
+
 def test_short_words_unchanged():
     # Length guards keep tiny tokens whole (no spurious -s / silent-e stripping).
     assert stem("is") == "is"

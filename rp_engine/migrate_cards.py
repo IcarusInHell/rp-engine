@@ -25,11 +25,14 @@ from rp_engine.utils.frontmatter import (
 
 @dataclass(slots=True)
 class MigrationReport:
+    """Outcome of a card-migration run — the file-path lists for migrated / skipped / errored cards."""
+
     migrated: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
+        """One-line tally — N migrated, N skipped, N errored."""
         return (
             f"{len(self.migrated)} migrated, "
             f"{len(self.skipped)} skipped, {len(self.errors)} errored"

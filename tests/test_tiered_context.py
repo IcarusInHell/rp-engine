@@ -206,6 +206,81 @@ async def test_filter_sent_cards_assigns_tier_at_the_call_site(seeded_rp):
 
 
 # ---------------------------------------------------------------------------
+# context_sent staleness must be tier-aware (brief→full re-send)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_context_sent(db, entity_id, content_hash, sent_turn, sent_tier):
+    fut = await db.enqueue_write(
+        """INSERT OR REPLACE INTO context_sent
+               (session_id, entity_id, content_hash, sent_at_turn, sent_at, sent_tier)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ["sess-1", entity_id, content_hash, sent_turn, "t", sent_tier],
+    )
+    await fut
+
+
+def _sent_card(eid: str, name: str, content_hash: str) -> dict:
+    return {
+        "id": eid,
+        "name": name,
+        "card_type": "lore",
+        "file_path": f"{eid}.md",
+        "content": "FULL BODY TEXT",
+        "summary": "the brief summary",
+        "content_hash": content_hash,
+    }
+
+
+async def test_context_sent_resends_on_tier_upgrade(seeded_rp):
+    """A card sent as `brief` that rises to `full` within the stale window must be
+    RE-SENT as a full document — NOT suppressed to a reference.
+
+    context_sent dedup keys on content_hash (tier-blind). On pre-fix code the
+    hash-match + within-window branch suppresses regardless of tier, so the upgrade
+    is silently swallowed and the LLM keeps only the brief. This is the silent drop
+    the fix closes. The pre-fix code IS the mutation: with the tier check removed,
+    'Upgrayedd' lands in references, not documents → the document assertion reds.
+    """
+    db = seeded_rp.db
+    ce = seeded_rp.container.context_engine
+
+    # Prior send at BRIEF tier, same hash, one turn ago (well within stale window).
+    await _seed_context_sent(db, "up", "HASH", sent_turn=1, sent_tier="brief")
+
+    card = _sent_card("up", "Upgrayedd", "HASH")
+    # keyword 1.0 → full tier; same hash; current 2 - sent 1 = 1 < stale_threshold.
+    docs, refs = await ce._filter_sent_cards([("up", (card, "keyword", 1.0))], "sess-1", 2)
+
+    doc_names = {d.name for d in docs}
+    assert "Upgrayedd" in doc_names, (
+        "a brief→full upgrade within the stale window must re-send as a document"
+    )
+    assert "Upgrayedd" not in {r.name for r in refs}
+    up = next(d for d in docs if d.name == "Upgrayedd")
+    assert up.injection_tier == "full" and up.content == "FULL BODY TEXT"
+
+
+async def test_context_sent_suppresses_same_tier(seeded_rp):
+    """Control: the fix must be tier-CONDITIONAL, not a blanket re-send. A card
+    already sent at `full`, same hash, within the window, stays suppressed to a
+    reference. Mutation (make the resolver re-send on any prior row): 'Samewise'
+    wrongly appears as a document → this reds."""
+    db = seeded_rp.db
+    ce = seeded_rp.container.context_engine
+
+    await _seed_context_sent(db, "same", "HASH2", sent_turn=1, sent_tier="full")
+
+    card = _sent_card("same", "Samewise", "HASH2")
+    docs, refs = await ce._filter_sent_cards([("same", (card, "keyword", 1.0))], "sess-1", 2)
+
+    assert "Samewise" not in {d.name for d in docs}, (
+        "same-tier re-send within the window must stay suppressed (no spurious re-send)"
+    )
+    assert "Samewise" in {r.name for r in refs}
+
+
+# ---------------------------------------------------------------------------
 # get_context seam — a briefed NPC is deduped from documents
 # ---------------------------------------------------------------------------
 

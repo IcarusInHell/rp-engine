@@ -476,6 +476,12 @@ class BranchManager:
 
         Append-only: never deletes data. The old timeline remains intact.
         Returns the new branch name.
+
+        CONSOLIDATION NOTE: re-implements the INSERT-branch →
+        ``_snapshot_trust_baselines`` → ``_snapshot_state_entries`` →
+        ``switch_branch`` sequence that ``create_branch`` already does — could
+        delegate to ``create_branch(branch_from=branch,
+        branch_point_exchange=target_exchange)`` instead of duplicating it.
         """
         cp = await self.db.fetch_one(
             "SELECT * FROM checkpoints WHERE name = ? AND rp_folder = ? AND branch = ?",

@@ -8,6 +8,8 @@ from .db import BehavioralPatternDB
 
 
 class BehavioralFeedbackProcessor(BaseFeedbackProcessor):
+    """Extracts NPC behavioral patterns from a correction — builds the LLM extraction prompt over the behavioral signature, defaulting to the self_interest category."""
+
     _category_enum = BehavioralCategory
 
     def __init__(self, db: BehavioralPatternDB, llm_call: Optional[Callable[[str], str]] = None):

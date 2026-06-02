@@ -56,6 +56,7 @@ class LorebookIndexer:
     # ------------------------------------------------------------------
 
     def rp_lorebook_dir(self, rp_folder: str) -> Path:
+        """Return the per-RP ``Lorebooks/`` folder path under the vault root."""
         return self.vault_root / rp_folder / "Lorebooks"
 
     @staticmethod
@@ -154,6 +155,7 @@ class LorebookIndexer:
         return written
 
     async def remove_file(self, path: Path) -> None:
+        """Drop all indexed entries for a deleted or renamed lorebook file."""
         await (await self.db.enqueue_write(
             "DELETE FROM lorebook_entries WHERE source_path = ?", [str(path)]
         ))
@@ -184,6 +186,7 @@ class LorebookIndexer:
             items = []
 
         out: list[LorebookEntry] = []
+        manual_presets = 0
         for e in items:
             if not isinstance(e, dict):
                 continue
@@ -193,15 +196,36 @@ class LorebookIndexer:
             keys = e.get("keys") or e.get("key") or []
             keywords = [str(k).strip() for k in keys if str(k).strip()]
             constant = bool(e.get("constant"))
-            # A keyless, non-constant ST entry can never fire — skip it (don't
-            # silently store an unmatchable row).
-            if not keywords and not constant:
-                continue
             enabled = bool(e.get("enabled", True)) and not bool(e.get("disable", False))
             weight = e.get("priority") or e.get("order") or e.get("insertion_order") or 1
             depth = e.get("depth") if isinstance(e.get("depth"), int) else None
             name = (str(e.get("comment") or e.get("name") or "").strip()
                     or (keywords[0] if keywords else "entry"))
+
+            # A keyless, NON-constant ST entry is a manually-SELECTED preset
+            # (narration/style libraries): not keyword- or always-on-activated.
+            # We have no per-entry selection mechanism yet, so it can't auto-fire
+            # — but we INDEX it (PRESERVE the content, file-drop ethos; never a
+            # silent drop) marked ``section_path='__manual_preset__'`` and inert
+            # (no keywords, not always_on → skipped at match time). A future
+            # selection mechanism activates these. Count for a loud summary log.
+            if not keywords and not constant:
+                manual_presets += 1
+                out.append(LorebookEntry(
+                    source_path=str(path),
+                    section_path="__manual_preset__",
+                    name=name,
+                    content=content,
+                    keywords=[],
+                    conditions=None,
+                    match_mode="any",
+                    budget_weight=int(weight) if isinstance(weight, (int, float)) else 1,
+                    always_on=False,
+                    depth=depth,
+                    enabled=enabled,
+                ))
+                continue
+
             out.append(LorebookEntry(
                 source_path=str(path),
                 name=name,
@@ -214,6 +238,14 @@ class LorebookIndexer:
                 depth=depth,
                 enabled=enabled,
             ))
+
+        if manual_presets:
+            logger.info(
+                "Lorebook %s: indexed %d keyless non-constant ST entr%s as MANUAL "
+                "presets (preserved, but inert — no per-entry selection mechanism "
+                "yet, so they won't auto-inject)",
+                path, manual_presets, "y" if manual_presets == 1 else "ies",
+            )
         return out
 
     # ------------------------------------------------------------------

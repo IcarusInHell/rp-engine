@@ -279,23 +279,38 @@ async def _import_state(
     # 6. CoW state tables (no FK remapping — they use exchange_number, not exchange_id)
     for table in [
         "character_state_entries", "scene_state_entries", "character_ledger",
-        "thread_counter_entries", "thread_status_entries",
-        "custom_state_schemas", "custom_state_entries",
     ]:
         await _import_table_batch(db, zf, table, rp_folder)
 
-    # 7. Tables with composite/text PKs (keep id column)
+    # 6b. Custom state. custom_state_schemas.id is a STABLE text key that
+    #     custom_state_entries references via schema_id WITHOUT remapping, so it
+    #     must be preserved (strip_id=False) and imported first. Stripping it nulls
+    #     a NOT NULL column → INSERT OR IGNORE silently drops the schema → the
+    #     entries' FK then aborts the whole import.
+    await _import_table_batch(db, zf, "custom_state_schemas", rp_folder, strip_id=False)
+    await _import_table_batch(db, zf, "custom_state_entries", rp_folder)
+
+    # 7. Tables with composite/text PKs (keep id column). plot_threads MUST precede
+    #    the thread_* child tables in step 8 — they carry a composite FK to
+    #    plot_threads(id, rp_folder), and FK enforcement is ON (importing a child
+    #    before its parent raises, aborting the whole import — not a silent drop).
     for table in ["plot_threads", "thread_counters", "situational_triggers", "rp_chunking_config"]:
         await _import_table_batch(db, zf, table, rp_folder, strip_id=False)
 
-    # 8. Analysis manifests (FK to exchanges.id, builds manifest_id_map)
+    # 8. Thread CoW child entries (FK → plot_threads; imported after it exists).
+    #    thread_id/plot_threads.id is preserved across import (plot_threads uses
+    #    strip_id=False), so the references stay valid without remapping.
+    for table in ["thread_counter_entries", "thread_status_entries"]:
+        await _import_table_batch(db, zf, table, rp_folder)
+
+    # 9. Analysis manifests (FK to exchanges.id, builds manifest_id_map)
     _, manifest_id_map = await _import_table_batch(
         db, zf, "analysis_manifests", rp_folder,
         fk_remaps={"exchange_id": exchange_id_map},
         build_id_map=True,
     )
 
-    # 9. Manifest entries (FK to manifests.id, conditional target_id remap)
+    # 10. Manifest entries (FK to manifests.id, conditional target_id remap)
     manifest_entries = _read_json(zf, "state/analysis_manifest_entries.json")
     for row in manifest_entries:
         row.pop("id", None)
@@ -307,7 +322,7 @@ async def _import_state(
             _remap_fk(row, "target_id", exchange_id_map)
         await _insert_row(db, "analysis_manifest_entries", row)
 
-    # 10. Optional tables (exchange_id FK where present)
+    # 11. Optional tables (exchange_id FK where present)
     for table in [
         "card_gaps", "card_gap_exchanges", "thread_evidence",
         "session_summaries", "session_recaps", "trust_baselines",

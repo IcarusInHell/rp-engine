@@ -20,6 +20,7 @@ from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.services.lorebook_indexer import LorebookIndexer
 from rp_engine.services.lorebook_service import LorebookService
 from rp_engine.services.trigger_evaluator import TriggerEvaluator
+from rp_engine.utils.provenance import collecting
 
 pytestmark = pytest.mark.asyncio
 
@@ -63,17 +64,24 @@ async def test_indexer_parses_st_keyword_and_constant(db, tmp_path):
     _write_st(lb_dir / "book.json", [
         {"keys": ["dragon", "wyrm"], "content": "Dragons hoard gold.", "order": 50},
         {"keys": [], "content": "Always narrate vividly.", "constant": True},
-        {"keys": [], "content": "unmatchable", "constant": False},  # skipped
+        {"keys": [], "content": "A manual narration preset.", "constant": False},  # preserved, inert
     ])
     idx = LorebookIndexer(db, tmp_path)
     n = await idx.index_rp("rp1")
-    assert n == 2, "keyless non-constant entry must be skipped (unmatchable)"
+    # NOTHING is dropped: keyword + always-on + the keyless-non-constant preset
+    # are ALL indexed. The preset is preserved (inert) — not silently lost.
+    assert n == 3, "all three entries indexed (keyless preset preserved, not dropped)"
 
     rows = await db.fetch_all("SELECT * FROM lorebook_entries WHERE scope='rp'")
     by_content = {r["content"]: r for r in rows}
     assert json.loads(by_content["Dragons hoard gold."]["keywords"]) == ["dragon", "wyrm"]
     assert by_content["Dragons hoard gold."]["always_on"] == 0
     assert by_content["Always narrate vividly."]["always_on"] == 1
+    # The keyless non-constant entry is preserved as an inert MANUAL preset:
+    preset = by_content["A manual narration preset."]
+    assert preset["section_path"] == "__manual_preset__"
+    assert preset["always_on"] == 0 and not json.loads(preset["keywords"] or "[]"), \
+        "manual preset has no keywords and is not always_on (inert until selection)"
     # No branch column exists on the table at all.
     cols = [c["name"] for c in await db.fetch_all("PRAGMA table_info(lorebook_entries)")]
     assert "branch" not in cols
@@ -193,6 +201,54 @@ async def test_prompt_world_info_section_present_and_guarded():
     assert "Dragons hoard gold." in rendered["world_info"]
 
 
+# ---------------------------------------------------------------------------
+# Provenance drop-ledger (Build B) — the two lorebook drop sites
+# ---------------------------------------------------------------------------
+
+async def test_lorebook_budget_drop_emits_provenance_event(db, tmp_path, monkeypatch):
+    """The char-budget drop in _budget also emits a DropEvent (mirrors
+    test_budget_drops_lower_weight_observable). Mutation (remove the emission):
+    no event → reds, while the kept/log behavior is unchanged."""
+    _patch_config(monkeypatch, budget=20)  # tiny
+    lb_dir = tmp_path / "rp1" / "Lorebooks"
+    lb_dir.mkdir(parents=True)
+    _write_st(lb_dir / "book.json", [
+        {"keys": ["dragon"], "content": "A" * 15, "order": 99},  # kept (high weight)
+        {"keys": ["dragon"], "content": "B" * 15, "order": 1},   # over budget → dropped
+    ])
+    await LorebookIndexer(db, tmp_path).index_rp("rp1")
+    svc = _service(db, tmp_path)
+    with collecting() as c:
+        hits = await svc.get_active_hits("rp1", "main", "a dragon", {})
+
+    assert [h.content for h in hits] == ["A" * 15], "highest weight kept (behavior unchanged)"
+    budget_drops = [d for d in c.drops if d.stage == "lorebook.budget"]
+    assert len(budget_drops) == 1, "the over-budget entry emits one DropEvent"
+    assert budget_drops[0].reason == "over_budget"
+    assert budget_drops[0].item_kind == "lorebook_entry"
+
+
+async def test_lorebook_word_boundary_drop_emits_provenance_event(db, tmp_path, monkeypatch):
+    """A keyword that matched only as a substring inside a larger word is dropped by
+    the word-boundary gate — and now emits a DropEvent. Mutation (remove the
+    emission): no event → reds, while the entry is still dropped (hits empty)."""
+    _patch_config(monkeypatch)
+    lb_dir = tmp_path / "rp1" / "Lorebooks"
+    lb_dir.mkdir(parents=True)
+    _write_st(lb_dir / "book.json", [
+        {"keys": ["art"], "content": "About art.", "order": 50},
+    ])
+    await LorebookIndexer(db, tmp_path).index_rp("rp1")
+    svc = _service(db, tmp_path)
+    with collecting() as c:
+        hits = await svc.get_active_hits("rp1", "main", "let's start now", {})
+
+    assert hits == [], "'art' only inside 'start' → word-boundary gate drops it"
+    wb_drops = [d for d in c.drops if d.stage == "lorebook.word_boundary"]
+    assert len(wb_drops) == 1, "the substring-only keyword hit emits one DropEvent"
+    assert wb_drops[0].reason == "substring_only"
+
+
 async def test_nsfl_shaped_entry_matches_on_primary_keys(db, tmp_path, monkeypatch):
     """The NSFL usage pattern: keyword-selective entries that ALSO carry
     ``keysecondary``/``selective``/``selectiveLogic`` AND-logic metadata, plus
@@ -224,9 +280,16 @@ async def test_nsfl_shaped_entry_matches_on_primary_keys(db, tmp_path, monkeypat
     assert await svc.get_active_hits("rp1", "main", "a silent forest", {}) == []
 
 
-async def test_real_narration_styles_fixture_indexes(db, tmp_path):
-    """The user's real ST always-on lorebook indexes (same schema as keyword
-    books). Constant entries with no keys are stored as always-on."""
+async def test_real_narration_styles_fixture_fully_preserved(db, tmp_path, monkeypatch):
+    """The user's real ST narration book: 9 entries = 1 constant (always-on) + 8
+    keyless non-constant SELECTABLE presets. NOTHING is dropped — all 9 index.
+    The 1 constant auto-fires; the 8 presets are preserved as inert manual
+    presets (no per-entry selection mechanism yet, so they don't auto-inject).
+
+    This is the regression test for the silent-drop bug the audit caught: the old
+    code dropped the 8 presets and the old assertion (n >= 1) hid it. The real
+    counts are now asserted, so a regression to dropping reddens this."""
+    _patch_config(monkeypatch)
     lb_dir = tmp_path / "rp1" / "Lorebooks"
     lb_dir.mkdir(parents=True)
     (lb_dir / "narration.json").write_text(
@@ -234,6 +297,16 @@ async def test_real_narration_styles_fixture_indexes(db, tmp_path):
     )
     idx = LorebookIndexer(db, tmp_path)
     n = await idx.index_rp("rp1")
-    assert n >= 1, "real narration_styles fixture should yield entries"
-    rows = await db.fetch_all("SELECT always_on FROM lorebook_entries")
-    assert any(r["always_on"] == 1 for r in rows), "constant entries → always_on"
+    assert n == 9, f"all 9 narration entries must be preserved, got {n} (silent drop?)"
+
+    rows = await db.fetch_all("SELECT always_on, section_path FROM lorebook_entries")
+    always_on = [r for r in rows if r["always_on"] == 1]
+    presets = [r for r in rows if r["section_path"] == "__manual_preset__"]
+    assert len(always_on) == 1, "exactly the 1 constant entry is always-on"
+    assert len(presets) == 8, "the 8 keyless non-constant presets are preserved as manual"
+
+    # At match time only the always-on entry fires; the 8 presets stay inert
+    # (correct — you don't auto-inject 8 contradictory narration styles at once).
+    svc = _service(db, tmp_path)
+    hits = await svc.get_active_hits("rp1", "main", "any scene text here", {})
+    assert len(hits) == 1, "only the always-on narration entry auto-fires; presets inert"

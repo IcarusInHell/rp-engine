@@ -1,3 +1,5 @@
+"""Writing intelligence package — learns, retrieves, and injects prose-craft patterns keyed by mode / register / intensity / position / content elements."""
+
 from .engine import WritingIntelligence
 from .types import (
     TaskSignature, Pattern, CorrectionPair, ScoredPattern,

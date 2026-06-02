@@ -8,11 +8,13 @@ from pydantic import BaseModel, model_validator
 
 
 class SceneOverride(BaseModel):
+    """Optional per-turn override of scene location and mood."""
     location: str | None = None
     mood: str | None = None
 
 
 class ChatRequest(BaseModel):
+    """A chat turn — user message, mode (rp/ooc/direction), streaming, and optional card attachments."""
     user_message: str
     stream: bool = False
     message_mode: Literal["rp", "ooc", "direction"] = "rp"
@@ -29,6 +31,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    """A completed chat turn — response text plus exchange/session identifiers."""
     response: str
     exchange_id: int
     exchange_number: int
@@ -40,6 +43,7 @@ class ChatResponse(BaseModel):
 
 
 class ChatStreamEvent(BaseModel):
+    """One server-sent event in a streamed chat turn — token, done, or error."""
     type: str  # "token", "done", "error"
     content: str | None = None
     exchange_id: int | None = None
@@ -49,6 +53,7 @@ class ChatStreamEvent(BaseModel):
 # --- Regenerate / Swipe ---
 
 class RegenerateRequest(BaseModel):
+    """Request to regenerate an exchange's assistant response as a new variant."""
     exchange_number: int | None = None  # defaults to latest
     temperature: float | None = None
     model: str | None = None
@@ -56,6 +61,7 @@ class RegenerateRequest(BaseModel):
 
 
 class RegenerateResponse(BaseModel):
+    """A regenerated variant — response plus variant index and total count."""
     response: str
     exchange_id: int
     exchange_number: int
@@ -66,11 +72,13 @@ class RegenerateResponse(BaseModel):
 
 
 class SwipeRequest(BaseModel):
+    """Request to switch an exchange to a different existing variant."""
     exchange_number: int
     variant_index: int
 
 
 class SwipeResponse(BaseModel):
+    """Result of a swipe — the now-active variant and its response."""
     exchange_number: int
     active_variant: int
     total_variants: int
@@ -78,6 +86,7 @@ class SwipeResponse(BaseModel):
 
 
 class VariantInfo(BaseModel):
+    """Metadata for one response variant — model, temperature, source, continue count."""
     id: int
     variant_index: int
     is_active: bool
@@ -89,6 +98,7 @@ class VariantInfo(BaseModel):
 
 
 class VariantsResponse(BaseModel):
+    """All response variants for an exchange."""
     exchange_number: int
     exchange_id: int
     variants: list[VariantInfo]
@@ -98,12 +108,14 @@ class VariantsResponse(BaseModel):
 # --- Continue ---
 
 class ContinueRequest(BaseModel):
+    """Request to extend an exchange's existing response with more text."""
     exchange_number: int | None = None  # defaults to latest
     max_tokens: int | None = None
     stream: bool = False
 
 
 class ContinueResponse(BaseModel):
+    """A continued response — the new continuation plus the full combined text."""
     continuation: str
     full_response: str
     exchange_id: int

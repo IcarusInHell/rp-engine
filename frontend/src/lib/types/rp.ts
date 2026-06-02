@@ -33,6 +33,10 @@ export interface GuidelinesResponse {
   include_writing_principles?: boolean;
   include_npc_framework?: boolean;
   include_output_format?: boolean;
+  // Phase 6: per-RP prompt-assembly overrides (Story_Guidelines.md frontmatter).
+  injection_depths?: Record<string, number> | null;
+  prompt_order?: string[] | null;
+  lorebooks?: string[] | null;
   avatar?: string | null;
   body?: string | null;
 }
@@ -54,6 +58,10 @@ export interface RechunkResponse {
 export interface PromptPreview {
   system_prompt: string;
   sections: string[];
+  // Phase 6: effective per-section injection depths + whether injection is on.
+  // When disabled (Phase 4 default), every section renders at depth 0; the map
+  // is the configured placement that would apply if injection were enabled.
+  injection?: { enabled: boolean; depths: Record<string, number> };
 }
 
 export interface ExportRequest {

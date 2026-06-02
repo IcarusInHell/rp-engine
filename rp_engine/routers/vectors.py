@@ -19,6 +19,8 @@ router = APIRouter(prefix="/api/vectors", tags=["vectors"])
 
 
 class ChunkRow(BaseModel):
+    """One vector chunk row with metadata — file/card identity, chunk index, content, and a real-embedding-presence flag."""
+
     id: int
     file_path: str | None
     rp_folder: str | None
@@ -31,6 +33,8 @@ class ChunkRow(BaseModel):
 
 
 class VectorStats(BaseModel):
+    """Aggregate chunk statistics — totals, embedding coverage, file count, average chunk size, and cards missing vectors."""
+
     total_chunks: int
     chunks_with_embeddings: int
     chunks_without_embeddings: int
@@ -40,12 +44,16 @@ class VectorStats(BaseModel):
 
 
 class SearchDebugRequest(BaseModel):
+    """Debug-search request body — a query string with optional RP-folder filter and result limit."""
+
     query: str
     rp_folder: str | None = None
     limit: int = 10
 
 
 class DebugSearchResult(BaseModel):
+    """One debug-search hit with per-source scores (vector, BM25, fused) and which source(s) found it."""
+
     id: int
     file_path: str | None
     card_type: str | None
@@ -254,6 +262,13 @@ async def search_debug(
         logger.warning("BM25 search failed in debug: %s", e)
 
     # --- RRF fusion ---
+    # CONSOLIDATION NOTE (A3, 3rd site): the rank-fusion formula below
+    # (1/(_RRF_K + rank), summed across legs) duplicates the A3 family —
+    # services/vector_search.py `_rrf_fuse` ∥ utils/search_ranking.py
+    # `reciprocal_rank_fusion`. This debug endpoint inlines it because it also
+    # needs the intermediate per-source rank maps for its DebugSearchResult
+    # output; a shared helper would need to expose those rankings to be reused
+    # here. Cross-linked for the eventual A3 consolidation pass.
     all_ids = set(vector_scores) | set(bm25_scores)
     if not all_ids:
         return []

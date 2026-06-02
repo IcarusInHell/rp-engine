@@ -65,6 +65,7 @@ class LLMClient:
         max_tokens: int = 1500,
         response_format: dict | None = None,
     ) -> LLMResponse:
+        """Route to the resolved provider, generate a completion, and log timing/usage diagnostics."""
         provider, resolved_model = self._resolve(model)
         start = time.perf_counter()
         try:
@@ -118,6 +119,7 @@ class LLMClient:
         temperature: float = 0.6,
         max_tokens: int = 1500,
     ) -> AsyncIterator[str]:
+        """Route to the resolved provider and stream completion chunks."""
         provider, resolved_model = self._resolve(model)
         async for chunk in provider.generate_stream(
             messages=messages,
@@ -132,6 +134,7 @@ class LLMClient:
         texts: list[str],
         model: str | None = None,
     ) -> list[list[float]]:
+        """Embed texts via the resolved provider, with fallback-provider retry on LLMError."""
         resolved_model = model or self._models.embeddings
         provider, final_model = self._resolve(resolved_model)
         start = time.perf_counter()
@@ -206,6 +209,7 @@ class LLMClient:
         logger.info("LLM providers reloaded: %s (default=%s)", list(new_providers), default)
 
     async def close(self) -> None:
+        """Close every underlying provider client."""
         for name, provider in self._providers.items():
             try:
                 await provider.close()

@@ -29,6 +29,7 @@ class _HealthLogFilter(logging.Filter):
         self._seen_first = False
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """Pass the first /health access-log record, suppress all subsequent ones."""
         msg = record.getMessage()
         if "/health" not in msg:
             return True
@@ -53,6 +54,7 @@ def _get_lan_ip() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """ASGI lifespan — build + start the service container on startup, attach it to app.state, and close it on shutdown."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
@@ -103,7 +105,10 @@ app.add_middleware(
 
 # Request logging middleware — logs every request when diagnostics enabled
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Logs every request (method/path/status/latency, and errors with traceback) to the diagnostic logger when diagnostics are enabled; pass-through otherwise."""
+
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Time the request and log its outcome (or the error + traceback) via the diagnostic logger."""
         diag = getattr(getattr(request.app.state, "services", None), "diagnostic_logger", None)
         if diag is None or not diag.enabled:
             return await call_next(request)
@@ -205,6 +210,7 @@ app.include_router(agent_chat.router)
 
 @app.get("/health")
 async def health_check():
+    """Health endpoint — server version, vault root, DB health, and indexed-card count."""
     config = get_config()
     db = app.state.db if hasattr(app.state, "db") else None
     db_health = await db.health() if db else {"status": "not_initialized"}
@@ -233,6 +239,7 @@ class _SPAStaticFiles(_StaticFiles):
     """StaticFiles subclass that sets no-cache on HTML (SPA shell) responses."""
 
     async def get_response(self, path: str, scope) -> _FileResponse:  # type: ignore[override]
+        """Serve a static file, forcing no-cache on the HTML SPA shell (it references hashed JS/CSS chunks)."""
         response = await super().get_response(path, scope)
         # Don't cache HTML — it references hashed JS/CSS chunks that change on rebuild
         ct = response.headers.get("content-type", "")

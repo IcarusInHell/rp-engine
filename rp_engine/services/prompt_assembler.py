@@ -26,6 +26,7 @@ from rp_engine.services.ancestry_resolver import AncestryResolver
 from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.utils.dialogue_parser import example_dialogue_messages
 from rp_engine.utils.frontmatter import parse_file
+from rp_engine.utils.provenance import record_drop, record_injected
 from rp_engine.utils.token_utils import estimate_messages_tokens, resolve_token_counter
 
 logger = logging.getLogger(__name__)
@@ -519,6 +520,15 @@ class PromptAssembler:
             # output still marks the dynamic context region (legacy always emits
             # it when there's a context_response).
             ordered.append(("__boundary__", "\n\n---\n"))
+        # Provenance: a section present this turn but omitted from prompt_order is
+        # dropped (additive — the reorder logic above is unchanged).
+        emitted = {name for name, _ in ordered if name != "__boundary__"}
+        for name in available:
+            if name not in emitted:
+                record_drop(
+                    "prompt.section_order", "section", "omitted_from_prompt_order",
+                    item_id=name,
+                )
         return ordered
 
     def _build_dynamic_sections(
@@ -648,8 +658,16 @@ class PromptAssembler:
         # Documents arrive score-sorted, so full → brief → reference naturally.
         if context_response.documents:
             items = ["\n\n# Relevant Context\n"]
-            # Body-only cards no longer waste the budget on YAML, so the cap is a
-            # generous safety limit (configurable, default 5000).
+            # Cap applies to whatever story_cards.content holds: body-only for
+            # sidecar/migrated cards (the cap is then a generous safety limit),
+            # but still frontmatter+body for un-migrated LEGACY cards — which
+            # therefore inject up to max_len chars of YAML until migrated
+            # (via `migrate-cards` or cards.auto_migrate). Configurable, default 5000.
+            # NOTE: the per-tier documents BUDGET (context.max_context_chars) is
+            # applied UPSTREAM in context_engine._filter_sent_cards — before
+            # context_sent recording — so a budget-dropped doc is never marked
+            # "sent" (which would silently suppress it next turn). The assembler
+            # only formats whatever survived; it must not re-budget here.
             max_len = get_config().context.max_card_content_length
             for doc in context_response.documents:
                 if doc.injection_tier == "reference":
@@ -686,6 +704,11 @@ class PromptAssembler:
         if context_response.lorebook_entries:
             items = ["\n\n# World Info\n"]
             for hit in context_response.lorebook_entries:
+                # Provenance inject-side (orphan flag): keyed to match the produce
+                # side in context_engine. Recorded at render; if prompt_order later
+                # omits world_info, that omission surfaces via its own section_order
+                # drop event (not silent), so this stays an accepted edge.
+                record_injected(f"lorebook:{hit.entry_id}")
                 items.append(hit.content)
             sections.append(("world_info", "\n".join(items)))
 
@@ -852,6 +875,21 @@ class PromptAssembler:
                 depths.update(guidelines.injection_depths)
         return depths
 
+    def injection_preview(self, rp_folder: str) -> dict:
+        """Preview metadata for the static prompt view (Phase 6).
+
+        Returns the effective per-section injection depths and whether the
+        injection feature is enabled. When injection is **disabled** (the Phase 4
+        default) every section renders at depth 0 (in the system message), so the
+        static preview is already accurate; the depth map is the *configured*
+        placement that would take effect if injection were enabled. This is a
+        config view, not a runtime ``build_messages`` simulation.
+        """
+        return {
+            "enabled": self.prompt_config.injection.enabled,
+            "depths": self._effective_injection_depths(rp_folder),
+        }
+
     def _history_token_budget(self) -> int:
         """Tokens allotted to exchange history under the token-budget feature."""
         tb = self.prompt_config.token_budget
@@ -969,6 +1007,40 @@ class PromptAssembler:
                 return messages
         return []
 
+    def _fit_examples_to_reserve(self, example_messages: list[dict]) -> list[dict]:
+        """Trim example few-shot pairs to the token-budget ``reserve`` allocation.
+
+        Feature D budget-coupling (corrections plan B1): example dialogue draws
+        from the ``reserve`` slice of the token budget and is the most expendable
+        prompt content — under pressure pairs are dropped **oldest first**, before
+        any history is touched. The caller skips this when ``pin_examples`` is set
+        (pinned examples always ship). Drops are **logged** (silent-drop guard).
+        ``example_messages`` is a flat ``[user, assistant, user, assistant, …]``
+        list, so one pair is two entries.
+        """
+        tb = self.prompt_config.token_budget
+        total = max(tb.model_context_window - self.config.max_tokens - tb.safety_margin, 0)
+        reserve_budget = int(total * tb.allocation.reserve)
+        counter = resolve_token_counter()
+
+        kept = list(example_messages)
+        dropped_pairs = 0
+        while kept and estimate_messages_tokens(kept, counter) > reserve_budget:
+            kept = kept[2:]  # drop the oldest user/assistant pair (front of the list)
+            dropped_pairs += 1
+        if dropped_pairs:
+            logger.warning(
+                "Example dialogue exceeds the reserve budget (%d tok): dropped %d "
+                "oldest pair(s), kept %d.",
+                reserve_budget, dropped_pairs, len(kept) // 2,
+            )
+            record_drop(
+                "prompt.example_reserve", "example_pair", "reserve_budget",
+                budget_before=reserve_budget,
+                detail=f"dropped {dropped_pairs} oldest pair(s), kept {len(kept) // 2}",
+            )
+        return kept
+
     async def build_messages(
         self,
         rp_folder: str,
@@ -1047,9 +1119,20 @@ class PromptAssembler:
 
         # --- Feature D: example dialogue few-shot, after system, before history ---
         if prompt_cfg.example_dialogue.enabled and context_response is not None:
-            messages.extend(await self._build_example_messages(
+            example_messages = await self._build_example_messages(
                 rp_folder, context_response, prompt_cfg.example_dialogue.max_examples,
-            ))
+            )
+            # Token-budget coupling (B1): examples draw from the `reserve`
+            # allocation and are the most expendable content — dropped oldest-pair-
+            # first before history is touched, unless pinned. With the budget off,
+            # only the max_examples count cap (applied above) governs.
+            if (
+                example_messages
+                and prompt_cfg.token_budget.enabled
+                and not prompt_cfg.example_dialogue.pin_examples
+            ):
+                example_messages = self._fit_examples_to_reserve(example_messages)
+            messages.extend(example_messages)
 
         # --- Feature B: token-aware history, else legacy count window ---
         if prompt_cfg.token_budget.enabled:

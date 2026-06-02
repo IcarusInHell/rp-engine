@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 class ExchangeSearchService:
+    """Multi-mode exchange-history search — semantic (LanceDB), keyword (SQLite LIKE), and hybrid (RRF), all ancestry-scoped."""
+
     def __init__(
         self,
         db: Database,

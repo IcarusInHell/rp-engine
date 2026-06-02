@@ -26,6 +26,8 @@ def _get_npc_intelligence(request: Request):
 
 
 class FeedbackBody(BaseModel):
+    """NPC-intelligence feedback submission — the original output plus optional user feedback/rewrite and an `accepted` flag."""
+
     original_output: str
     user_feedback: str | None = None
     user_rewrite: str | None = None

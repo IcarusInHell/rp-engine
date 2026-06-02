@@ -58,4 +58,5 @@ class LRUCache(Generic[KT, VT]):  # noqa: UP046
         return iter(self._data)
 
     def keys(self):
+        """Return a view of cached keys in LRU→MRU order (does NOT promote)."""
         return self._data.keys()

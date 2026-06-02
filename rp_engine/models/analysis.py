@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class PlotThreadExtracted(BaseModel):
+    """An LLM-extracted plot-thread development — name, status, and evidence."""
     thread_name: str = Field(alias="threadName", default="")
     status: str = ""
     development: str = ""
@@ -19,6 +20,7 @@ class PlotThreadExtracted(BaseModel):
 
 
 class MemoryExtracted(BaseModel):
+    """An LLM-extracted memory — description, significance, and characters."""
     description: str = ""
     significance: str = ""
     characters: list[str] = []
@@ -26,6 +28,7 @@ class MemoryExtracted(BaseModel):
 
 
 class KnowledgeBoundary(BaseModel):
+    """An LLM-extracted knowledge-boundary event — who learned what, from where."""
     who: str = ""
     learned: str = ""
     from_: str = Field(alias="from", default="")
@@ -36,6 +39,7 @@ class KnowledgeBoundary(BaseModel):
 
 
 class NewCharacterExtracted(BaseModel):
+    """An LLM-extracted newly-introduced character."""
     name: str = ""
     role: str = ""
     first_appearance: str = Field(alias="firstAppearance", default="")
@@ -44,6 +48,7 @@ class NewCharacterExtracted(BaseModel):
 
 
 class NewLocationExtracted(BaseModel):
+    """An LLM-extracted newly-mentioned location."""
     name: str = ""
     description: str = ""
     first_mention: str = Field(alias="firstMention", default="")
@@ -52,17 +57,20 @@ class NewLocationExtracted(BaseModel):
 
 
 class NewConceptExtracted(BaseModel):
+    """An LLM-extracted new concept with its significance."""
     name: str = ""
     significance: str = ""
 
 
 class NewEntitiesExtracted(BaseModel):
+    """LLM-extracted new entities — characters, locations, and concepts."""
     characters: list[NewCharacterExtracted] = []
     locations: list[NewLocationExtracted] = []
     concepts: list[NewConceptExtracted] = []
 
 
 class RelationshipDynamic(BaseModel):
+    """An LLM-extracted relationship change between characters."""
     characters: list[str] = []
     change_type: str = Field(alias="changeType", default="")
     evidence: str = ""
@@ -71,6 +79,7 @@ class RelationshipDynamic(BaseModel):
 
 
 class TrustMoment(BaseModel):
+    """An LLM-extracted trust-affecting moment with a character."""
     type: str = ""
     action: str = ""
     with_character: str = Field(alias="withCharacter", default="")
@@ -80,6 +89,7 @@ class TrustMoment(BaseModel):
 
 
 class NPCInteractionExtracted(BaseModel):
+    """An LLM-extracted NPC interaction — actions, emotional state, and trust moments."""
     npc_name: str = Field(alias="npcName", default="")
     appeared_in_exchange: list[int] = Field(alias="appearedInExchange", default=[])
     actions: list[str] = []
@@ -91,6 +101,7 @@ class NPCInteractionExtracted(BaseModel):
 
 
 class CharacterStateExtracted(BaseModel):
+    """An LLM-extracted character state — location, conditions, emotion."""
     location: str | None = None
     conditions: list[str] = []
     emotional_state: str = Field(alias="emotionalState", default="")
@@ -99,6 +110,7 @@ class CharacterStateExtracted(BaseModel):
 
 
 class SceneContextExtracted(BaseModel):
+    """An LLM-extracted scene context — location, time of day, mood."""
     location: str | None = None
     time_of_day: str = Field(alias="timeOfDay", default="")
     mood: str = ""
@@ -107,12 +119,14 @@ class SceneContextExtracted(BaseModel):
 
 
 class SignificantEventExtracted(BaseModel):
+    """An LLM-extracted significant event with characters and significance."""
     event: str = ""
     characters: list[str] = []
     significance: str = "medium"
 
 
 class StoryStateExtracted(BaseModel):
+    """LLM-extracted story state — character states, scene context, and events."""
     characters: dict[str, CharacterStateExtracted] = {}
     scene_context: SceneContextExtracted = Field(
         alias="sceneContext", default_factory=SceneContextExtracted
@@ -125,6 +139,7 @@ class StoryStateExtracted(BaseModel):
 
 
 class SceneSignificance(BaseModel):
+    """LLM-scored scene significance — score, categories, and suggested card types."""
     score: int = 0
     categories: list[str] = []
     brief: str | None = None
@@ -136,6 +151,7 @@ class SceneSignificance(BaseModel):
 
 
 class CustomStateChangeExtracted(BaseModel):
+    """An LLM-extracted custom-state change — schema, entity, action, and value."""
     schema_name: str = Field(alias="schemaName", default="")
     entity: str = ""              # character name or "" for scene-level
     action: str = ""              # "set", "add", "remove", "subtract"
@@ -180,6 +196,7 @@ class AnalysisLLMResult(BaseModel):
 
 
 class AnalysisResult(BaseModel):
+    """Summary of an analysis pipeline run — per-domain counts and any error."""
     exchange_id: int
     status: str = "completed"
     characters_updated: int = 0
@@ -200,6 +217,7 @@ class AnalysisResult(BaseModel):
 
 
 class CardGapItem(BaseModel):
+    """A detected card gap — an entity seen repeatedly with no card, and the suggested type."""
     entity_name: str
     suggested_type: str | None = None
     seen_count: int = 1
@@ -208,6 +226,7 @@ class CardGapItem(BaseModel):
 
 
 class CardGapResponse(BaseModel):
+    """All detected card gaps with a total."""
     gaps: list[CardGapItem] = []
     total: int = 0
 
@@ -218,6 +237,7 @@ class CardGapResponse(BaseModel):
 
 
 class CardSuggestRequest(BaseModel):
+    """Request to AI-author a card for an entity."""
     entity_name: str
     card_type: str
     rp_folder: str
@@ -225,6 +245,7 @@ class CardSuggestRequest(BaseModel):
 
 
 class CardSuggestResponse(BaseModel):
+    """An AI-authored card suggestion — generated markdown and the model used."""
     entity_name: str
     card_type: str
     markdown: str
@@ -232,6 +253,15 @@ class CardSuggestResponse(BaseModel):
 
 
 class CardAuditGapItem(BaseModel):
+    """A card-gap item in a card-audit response — entity, suggested type, and mention count.
+
+    CONSOLIDATION NOTE: near-identical to ``AuditGap`` (models/story_card.py) — same
+    fields, only ``mention_count`` default differs. The whole card-suggest/audit family
+    is duplicated across analysis.py ∥ story_card.py: CardSuggestRequest∥SuggestCardRequest,
+    CardSuggestResponse∥SuggestCardResponse, CardAuditRequest∥AuditCardsRequest,
+    CardAuditResponse∥AuditCardsResponse. rdeps both families (analysis router vs cards
+    router) to pick the canonical set before merging — don't assume either is dead.
+    """
     entity_name: str
     suggested_type: str | None = None
     mention_count: int = 0
@@ -239,12 +269,14 @@ class CardAuditGapItem(BaseModel):
 
 
 class CardAuditRequest(BaseModel):
+    """Request to audit an RP for missing cards."""
     rp_folder: str
     mode: str = "quick"
     session_id: str | None = None
 
 
 class CardAuditResponse(BaseModel):
+    """Card-audit results — detected gaps and scan counts."""
     mode: str
     gaps: list[CardAuditGapItem] = []
     total_exchanges_scanned: int = 0
@@ -257,6 +289,7 @@ class CardAuditResponse(BaseModel):
 
 
 class ThreadEvidence(BaseModel):
+    """Evidence for a plot-thread counter change — matched keyword and before/after counter."""
     thread_id: str
     exchange_number: int
     keyword_matched: str | None = None
@@ -268,6 +301,7 @@ class ThreadEvidence(BaseModel):
 
 
 class ThreadDetail(BaseModel):
+    """A plot thread's full detail — counter, thresholds, consequences, and evidence."""
     thread_id: str
     name: str
     thread_type: str | None = None
@@ -282,11 +316,13 @@ class ThreadDetail(BaseModel):
 
 
 class ThreadListResponse(BaseModel):
+    """All plot threads with a total."""
     threads: list[ThreadDetail] = []
     total: int = 0
 
 
 class ThreadCounterUpdate(BaseModel):
+    """Request to set a plot thread's counter."""
     counter: int
 
 
@@ -296,11 +332,13 @@ class ThreadCounterUpdate(BaseModel):
 
 
 class TimeAdvanceRequest(BaseModel):
+    """Request to advance the in-story clock from response text or an explicit override."""
     response_text: str | None = None
     override_minutes: int | None = None
 
 
 class TimeAdvanceResponse(BaseModel):
+    """Result of advancing the in-story clock — new timestamp and elapsed minutes."""
     previous_timestamp: str | None = None
     new_timestamp: str | None = None
     elapsed_minutes: int = 0
@@ -314,12 +352,14 @@ class TimeAdvanceResponse(BaseModel):
 
 
 class ManifestEntryResponse(BaseModel):
+    """One row written by an analysis run — its table, id, and operation."""
     target_table: str
     target_id: int
     operation: str = "insert"
 
 
 class ManifestResponse(BaseModel):
+    """An analysis run's manifest — the rows it wrote, for undo/preview."""
     id: int
     exchange_number: int
     exchange_id: int
@@ -334,11 +374,13 @@ class ManifestResponse(BaseModel):
 
 
 class ManifestListResponse(BaseModel):
+    """All analysis manifests with a total."""
     manifests: list[ManifestResponse] = []
     total: int = 0
 
 
 class AnalysisUndoResponse(BaseModel):
+    """Result of undoing an analysis run — rows removed and any cascade re-analysis."""
     exchange_number: int
     manifest_id: int
     status: str  # 'undone' | 'not_found' | 'already_undone'
@@ -348,6 +390,7 @@ class AnalysisUndoResponse(BaseModel):
 
 
 class AnalysisPreviewResponse(BaseModel):
+    """Preview of what undoing an analysis run would remove."""
     exchange_number: int
     manifest_id: int
     entries_count: int = 0

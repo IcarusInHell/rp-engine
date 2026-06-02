@@ -31,6 +31,8 @@ router = APIRouter(prefix="/api/lorebook", tags=["lorebook"])
 
 
 class LorebookFile(BaseModel):
+    """One discoverable lorebook file — stem, scope ('rp' or 'global'), on-disk path, and whether it's active for this RP."""
+
     stem: str
     scope: str          # 'rp' | 'global'
     path: str
@@ -38,12 +40,16 @@ class LorebookFile(BaseModel):
 
 
 class LorebookListResponse(BaseModel):
+    """Lorebook listing — the global enabled flag, the per-RP active-set (None = all per-RP files active), and the discovered files."""
+
     enabled: bool                       # global lorebook_enabled config
     active_set: list[str] | None        # explicit per-RP list, or None = all per-RP active
     files: list[LorebookFile]
 
 
 class ActiveSetUpdate(BaseModel):
+    """Request body to set the per-RP active lorebook stems (written to `lorebooks:` frontmatter)."""
+
     lorebooks: list[str]
 
 

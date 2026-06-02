@@ -50,6 +50,7 @@ from rp_engine.services.state_entry_resolver import (
 from rp_engine.services.trigger_evaluator import TriggerEvaluator
 from rp_engine.services.vector_search import VectorSearch
 from rp_engine.utils.json_helpers import safe_parse_json, safe_parse_json_list
+from rp_engine.utils.provenance import record_drop, record_produced
 from rp_engine.utils.stemmer import stem_tokens
 from rp_engine.utils.text import hash_content as _hash_content
 from rp_engine.utils.trust import fetch_trust_map
@@ -58,6 +59,12 @@ logger = logging.getLogger(__name__)
 
 # Importance levels that get full NPC briefs
 BRIEF_IMPORTANCE = {"critical", "main", "antagonist", "love_interest"}
+
+# Injection-tier ordering (low → high). Used by context_sent dedup to detect a
+# tier UPGRADE: a card last sent at a lower tier that now warrants a higher one
+# must be re-sent, since content_hash alone is tier-blind. None (legacy/pre-031
+# rows) ranks below `reference` (-1) so the first post-migration send backfills.
+_TIER_RANK = {"reference": 0, "brief": 1, "full": 2}
 
 
 class ContextEngine:
@@ -219,6 +226,7 @@ class ContextEngine:
                 )
             except Exception as e:
                 logger.warning("Lorebook matching failed: %s", e)
+                record_drop("context.lorebook", "subsystem", "failure", detail=str(e))
 
         # ---- Stage 3: NPC Handling (built BEFORE ranking so briefed NPCs are
         # excluded from the document pool *before* the max_documents slice — they're
@@ -278,6 +286,12 @@ class ContextEngine:
                 },
             )
 
+        # Provenance: record produced lorebook entries so the orphan flag can detect
+        # any that never reach the assembled prompt (produced − injected − dropped).
+        # Keyed to match the inject-side record_injected in _build_dynamic_sections.
+        for _e in lorebook_entries:
+            record_produced("lorebook", f"lorebook:{_e.entry_id}")
+
         return ContextResponse(
             current_exchange=current_turn,
             documents=documents,
@@ -318,6 +332,11 @@ class ContextEngine:
         ``exclude_ids`` (entity_ids of NPCs that already have a brief) are dropped
         from the pool *before* the ``max_documents`` slice so lower-ranked cards
         backfill the freed slots rather than the document count silently shrinking.
+
+        CONSOLIDATION NOTE: the ``_CARD_COLS`` story_cards 7-column SELECT list
+        defined here is re-inlined byte-for-byte in ``_keyword_match`` (and as
+        ``_CARD_COLS + ", frontmatter"`` in ``_get_always_load_cards``) — hoist to a
+        module-level constant and reuse (within-file DRY; no shared helper needed).
         """
         exclude_ids = exclude_ids or set()
         # Merge all card sources
@@ -404,25 +423,47 @@ class ContextEngine:
         current_turn: int,
     ) -> tuple[list[ContextDocument], list[ContextReference]]:
         """Stage 3.5: dedup against context_sent — emit fresh/updated cards as
-        documents, already-sent-and-unchanged cards as references."""
-        documents: list[ContextDocument] = []
-        references: list[ContextReference] = []
+        documents, already-sent-and-unchanged cards as references.
 
+        Suppression is **tier-aware** (migration 031): a card already sent within
+        the stale window is held back as a reference ONLY when its content is
+        unchanged AND its tier hasn't risen. A brief→full upgrade (the card became
+        more relevant) re-sends — content_hash alone is tier-blind, so without this
+        the upgraded full body would be silently swallowed and the LLM would keep
+        only the stale brief.
+
+        The optional **per-tier char budget** (``context.max_context_chars``) is
+        applied HERE — *before* a surviving doc is recorded in ``context_sent`` —
+        so a budget-dropped doc is never marked "sent". Recording a dropped doc as
+        sent would suppress it on the next turn (it'd look already-loaded) and it
+        could never reach the LLM: the exact silent cross-turn drop migration 031
+        closed. Hence three passes: classify → budget → record."""
+        references: list[ContextReference] = []
+        # Pass 1 — classify. References emit now; surviving cards become document
+        # candidates but are NOT recorded sent yet (the budget may still drop them).
+        candidates: list[dict] = []
         for entity_id, (card, source, score) in top_cards:
             content_hash = card.get("content_hash") or _hash_content(card.get("content", ""))
+            tier = self._assign_tier(source, score)
             sent_row = None
             if session_id:
                 sent_row = await self.db.fetch_one(
-                    "SELECT content_hash, sent_at_turn FROM context_sent WHERE session_id = ? AND entity_id = ?",
+                    "SELECT content_hash, sent_at_turn, sent_tier FROM context_sent WHERE session_id = ? AND entity_id = ?",
                     [session_id, entity_id],
                 )
 
             if sent_row:
                 old_hash = sent_row["content_hash"]
                 sent_turn = sent_row["sent_at_turn"]
+                hash_same = old_hash == content_hash
+                within_window = (current_turn - sent_turn) < self.config.stale_threshold_turns
+                # Tier upgrade ⇒ re-send even on a hash match (content_hash is
+                # tier-blind). None (legacy row) ranks below `reference` so it
+                # backfills once.
+                tier_upgraded = _TIER_RANK.get(tier, 0) > _TIER_RANK.get(sent_row["sent_tier"], -1)
 
-                if old_hash == content_hash and (current_turn - sent_turn) < self.config.stale_threshold_turns:
-                    # Already sent, unchanged, within stale window → reference
+                if hash_same and within_window and not tier_upgraded:
+                    # Already sent, unchanged, same-or-lower tier, within window → reference
                     references.append(ContextReference(
                         name=card["name"],
                         card_type=card["card_type"],
@@ -430,37 +471,99 @@ class ContextEngine:
                     ))
                     continue
                 else:
-                    status = "updated" if old_hash != content_hash else "new"
+                    status = "updated" if (not hash_same or tier_upgraded) else "new"
             else:
                 status = "new"
 
-            tier = self._assign_tier(source, score)
             content, summary = self._tier_fields(card, tier)
-            documents.append(ContextDocument(
-                name=card["name"],
-                card_type=card["card_type"],
-                file_path=card.get("file_path", ""),
-                source=source,
-                relevance_score=score,
-                content=content,
-                summary=summary,
-                status=status,
-                injection_tier=tier,
-            ))
+            candidates.append({
+                "entity_id": entity_id,
+                "content_hash": content_hash,
+                "tier": tier,
+                "doc": ContextDocument(
+                    name=card["name"],
+                    card_type=card["card_type"],
+                    file_path=card.get("file_path", ""),
+                    source=source,
+                    relevance_score=score,
+                    content=content,
+                    summary=summary,
+                    status=status,
+                    injection_tier=tier,
+                ),
+            })
 
-            # Record sent (await to ensure committed before next read)
-            if session_id:
+        # Pass 2 — per-tier budget (drops over-allocation candidates, logged).
+        kept = self._apply_tier_budget(candidates)
+
+        # Pass 3 — emit kept docs and record them sent (only what actually ships).
+        documents = [c["doc"] for c in kept]
+        if session_id:
+            for c in kept:
                 now = datetime.now(UTC).isoformat()
                 future = await self.db.enqueue_write(
                     """INSERT OR REPLACE INTO context_sent
-                           (session_id, entity_id, content_hash, sent_at_turn, sent_at)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    [session_id, entity_id, content_hash, current_turn, now],
+                           (session_id, entity_id, content_hash, sent_at_turn, sent_at, sent_tier)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    [session_id, c["entity_id"], c["content_hash"], current_turn, now, c["tier"]],
                     priority=PRIORITY_ANALYSIS,
                 )
                 await future
 
         return documents, references
+
+    def _apply_tier_budget(self, candidates: list[dict]) -> list[dict]:
+        """Bound the documents section to ``context.max_context_chars``, split per
+        tier via ``tier_allocation`` (each tier INDEPENDENT — full's unused share
+        does not spill into brief). ``max_context_chars <= 0`` disables the budget
+        (returns all candidates → byte-identical to pre-budget output).
+
+        Over-budget candidates are dropped lowest-priority-first (candidates arrive
+        score-sorted) and the drops are LOGGED — never silent. The first candidate
+        of any tier is always admitted (per-card ``max_card_content_length`` is the
+        real per-card cap), so a tight budget can't nuke the single most-relevant
+        card. Cost is the content volume the doc carries (full body, else summary).
+        """
+        budget_total = self.config.max_context_chars
+        if budget_total <= 0:
+            return candidates
+        alloc = self.config.tier_allocation
+        tier_budget = {
+            "full": int(budget_total * alloc.full),
+            "brief": int(budget_total * alloc.brief),
+            "reference": int(budget_total * alloc.reference),
+        }
+        consumed = {"full": 0, "brief": 0, "reference": 0}
+        kept: list[dict] = []
+        dropped: list[tuple[str, str]] = []
+        # A full-tier doc.content is the UNCAPPED body; only its first
+        # max_card_content_length chars actually ship (the assembler slices), so
+        # charge the budget for what ships, not the raw body (else an oversized
+        # card over-charges and drops later cards harder than reality warrants).
+        content_cap = self.config.max_card_content_length
+        for c in candidates:
+            tier = c["tier"]
+            doc = c["doc"]
+            cost = len((doc.content or "")[:content_cap]) + len(doc.summary or "")
+            if consumed[tier] > 0 and consumed[tier] + cost > tier_budget[tier]:
+                dropped.append((doc.name, tier))
+                record_drop(
+                    "context.tier_budget", "document", "over_budget",
+                    item_id=c["entity_id"], score=doc.relevance_score,
+                    budget_before=tier_budget[tier], budget_after=consumed[tier],
+                    detail=f"{doc.name} [{tier}] cost={cost}",
+                )
+                continue
+            consumed[tier] += cost
+            kept.append(c)
+        if dropped:
+            logger.warning(
+                "context budget (%d chars) dropped %d over-allocation document(s): %s",
+                budget_total,
+                len(dropped),
+                ", ".join(f"{name} [{tier}]" for name, tier in dropped),
+            )
+        return kept
 
     def _assign_tier(self, source: str, score: float) -> Literal["full", "brief", "reference"]:
         """Map a card's source + relevance score to an injection tier.
@@ -696,6 +799,7 @@ class ContextEngine:
             )
         except Exception as e:
             logger.warning("Past exchange search failed: %s", e)
+            record_drop("context.past_exchanges", "subsystem", "failure", detail=str(e))
             return []
 
         # Filter and deduplicate
@@ -754,6 +858,7 @@ class ContextEngine:
             )
         except Exception as e:
             logger.warning("Extracted memories query failed: %s", e)
+            record_drop("context.extracted_memories", "subsystem", "failure", detail=str(e))
             return []
 
         if not rows:
@@ -845,6 +950,7 @@ class ContextEngine:
             return await self.vector_search.search(query, rp_folder=rp_folder, limit=5)
         except Exception as e:
             logger.warning("Semantic search failed: %s", e)
+            record_drop("context.semantic_search", "subsystem", "failure", detail=str(e))
             return []
 
     async def _get_scene_state(self, rp_folder: str, branch: str) -> SceneState:
@@ -915,8 +1021,9 @@ class ContextEngine:
                 task_context=task_desc,
                 token_count=payload.token_count,
             )
-        except Exception:
+        except Exception as e:
             logger.warning("Writing intelligence failed", exc_info=True)
+            record_drop("context.writing_intelligence", "subsystem", "failure", detail=str(e))
             return None
 
     def _get_rp_pacing(self, rp_folder: str) -> str:

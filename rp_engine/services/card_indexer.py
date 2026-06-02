@@ -20,6 +20,7 @@ from rp_engine.utils.frontmatter import find_sidecar, parse_frontmatter, read_si
 from rp_engine.utils.normalization import (
     file_to_key,
     id_to_key,
+    make_entity_id,
     normalize_key,
     strip_parenthetical,
 )
@@ -341,7 +342,7 @@ class CardIndexer:
             return None
 
         return CardData(
-            entity_id=f"{rp_folder}:{normalize_key(name)}",
+            entity_id=make_entity_id(rp_folder, name),
             rp_folder=rp_folder,
             file_path=str(rel_path).replace("\\", "/"),
             card_type=self._detect_type(frontmatter, rel_path),
@@ -1016,7 +1017,7 @@ class CardIndexer:
                 return alias_map[key4]
 
         # Unresolved — use normalized key with rp_folder prefix
-        return f"{rp_folder}:{key}"
+        return make_entity_id(rp_folder, raw)
 
     # ------------------------------------------------------------------
     # Internal: DB helpers

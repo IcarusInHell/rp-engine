@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class StoryCardSummary(BaseModel):
+    """A story card list-row — identity, type, importance, and connection count."""
     model_config = ConfigDict(from_attributes=True)
 
     id: str  # DB primary key ("rp_folder:normalized_name"); used by chat attach
@@ -22,6 +23,7 @@ class StoryCardSummary(BaseModel):
 
 
 class EntityConnection(BaseModel):
+    """A connection from one card to another entity — type, field, and role."""
     to_entity: str
     connection_type: str
     field: str | None = None
@@ -29,6 +31,7 @@ class EntityConnection(BaseModel):
 
 
 class StoryCardDetail(BaseModel):
+    """A full story card — frontmatter, content, body, and resolved connections."""
     model_config = ConfigDict(from_attributes=True)
 
     name: str
@@ -42,22 +45,26 @@ class StoryCardDetail(BaseModel):
 
 
 class StoryCardCreate(BaseModel):
+    """Request to create a story card from frontmatter and content."""
     name: str
     frontmatter: dict[str, Any] = {}
     content: str = ""
 
 
 class StoryCardUpdate(BaseModel):
+    """Partial update to a story card's frontmatter and/or content."""
     frontmatter: dict[str, Any] | None = None
     content: str | None = None
 
 
 class CardListResponse(BaseModel):
+    """A page of story-card summaries with a total."""
     cards: list[StoryCardSummary]
     total: int
 
 
 class ReindexResponse(BaseModel):
+    """Counts from a card reindex — entities, connections, aliases, keywords, chunks."""
     entities: int
     connections: int
     aliases: int
@@ -68,6 +75,7 @@ class ReindexResponse(BaseModel):
 
 
 class SuggestCardRequest(BaseModel):
+    """Request to AI-author a card, with related entities and branch scope."""
     entity_name: str
     card_type: str = "character"
     rp_folder: str
@@ -77,6 +85,7 @@ class SuggestCardRequest(BaseModel):
 
 
 class SuggestCardResponse(BaseModel):
+    """An AI-authored card — generated markdown and the model used."""
     entity_name: str
     card_type: str
     markdown: str
@@ -84,6 +93,7 @@ class SuggestCardResponse(BaseModel):
 
 
 class AuditCardsRequest(BaseModel):
+    """Request to audit a branch for missing cards."""
     rp_folder: str
     mode: str = "quick"
     session_id: str | None = None
@@ -91,6 +101,12 @@ class AuditCardsRequest(BaseModel):
 
 
 class AuditGap(BaseModel):
+    """A card-gap item in a card-audit response — entity, suggested type, and mention count.
+
+    CONSOLIDATION NOTE: near-identical to ``CardAuditGapItem`` (models/analysis.py);
+    see that class's note for the full duplicated card-suggest/audit family across
+    analysis.py ∥ story_card.py.
+    """
     entity_name: str
     suggested_type: str | None = None
     mention_count: int
@@ -98,6 +114,7 @@ class AuditGap(BaseModel):
 
 
 class AuditCardsResponse(BaseModel):
+    """Card-audit results — detected gaps and scan counts."""
     mode: str
     gaps: list[AuditGap]
     total_exchanges_scanned: int
@@ -105,12 +122,14 @@ class AuditCardsResponse(BaseModel):
 
 
 class GapExchangeRecord(BaseModel):
+    """One exchange where a gap entity was mentioned, with mention type."""
     exchange_number: int
     chunk_text: str | None = None
     mention_type: str = "peripheral"
 
 
 class SceneEvidence(BaseModel):
+    """A scene's worth of gap-entity mentions — exchange span and records."""
     start: int
     end: int
     exchange_count: int
@@ -118,6 +137,7 @@ class SceneEvidence(BaseModel):
 
 
 class GapEvidenceResponse(BaseModel):
+    """Full evidence for a card gap — mention counts grouped into scenes."""
     entity_name: str
     rp_folder: str
     total_mentions: int
@@ -126,34 +146,40 @@ class GapEvidenceResponse(BaseModel):
 
 
 class GenerateCardNameRequest(BaseModel):
+    """Request to generate candidate card names from hints."""
     card_type: str
     hints: str = ""
     count: int = 5
 
 
 class GenerateCardNameResponse(BaseModel):
+    """Generated card-name suggestions for a card type."""
     suggestions: list[str]
     card_type: str
 
 
 class CardValidateRequest(BaseModel):
+    """Request to validate frontmatter against a card type's schema."""
     card_type: str
     frontmatter: dict[str, Any]
 
 
 class DeleteCardResponse(BaseModel):
+    """Result of deleting a card — whether the .md file was removed."""
     name: str
     card_type: str
     file_deleted: bool
 
 
 class RelationshipSyncEntry(BaseModel):
+    """A reciprocal relationship added to a partner card during sync."""
     card_name: str
     card_type: str
     relationship_added: dict[str, Any]
 
 
 class RelationshipSyncResult(BaseModel):
+    """Result of reciprocal-relationship sync — updated cards and errors."""
     source_card: str
     updated_cards: list[RelationshipSyncEntry] = []
     errors: list[str] = []

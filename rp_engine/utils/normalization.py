@@ -15,6 +15,23 @@ def normalize_key(name: str) -> str:
     return str(name).lower().strip()
 
 
+def make_entity_id(rp_folder: str, name: str) -> str:
+    """Build the canonical entity_id / connection key for a card name.
+
+    Entity rows (``story_cards.id``) and both endpoints of
+    ``entity_connections`` (``from_entity`` / ``to_entity``) are stored as
+    ``f"{rp_folder}:{normalize_key(name)}"`` — the ``rp_folder`` case is
+    preserved, the name part is lowercased+stripped.
+
+    Any cross-table join *into* ``entity_connections`` must build its lookup key
+    through this function: comparing a bare display name (as stored in
+    ``trust_baselines.character_a/b``) against a ``folder:key`` row silently
+    misses every time (the relationship-role / ``dynamic`` drop). Centralising
+    the format here keeps write-side and read-side from drifting apart.
+    """
+    return f"{rp_folder}:{normalize_key(name)}"
+
+
 def file_to_key(filename: str) -> str:
     """Convert a filename (with or without .md) to a normalized key."""
     if not filename:

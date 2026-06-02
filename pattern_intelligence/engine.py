@@ -34,11 +34,13 @@ class BasePatternIntelligence:
         self._exchange_count: int = 0
 
     def start_session(self) -> str:
+        """Begin a new learning session (resets the exchange counter); returns the session id."""
         self._session_id = self.db.create_session()
         self._exchange_count = 0
         return self._session_id
 
     def end_session(self) -> dict:
+        """End the session, persisting exchange count + active-pattern count + average proficiency; returns the summary dict."""
         patterns = self.db.get_all_patterns()
         avg_prof = (sum(p.proficiency for p in patterns) / len(patterns)) if patterns else 0.0
         self.db.end_session(self._session_id, self._exchange_count,
@@ -66,6 +68,7 @@ class BasePatternIntelligence:
 
     def record_outcome(self, output_text: str, accepted: bool = True,
                        feedback: Optional[FeedbackInput] = None) -> dict:
+        """Record whether the last prepared output was accepted or corrected — bumps proficiency on accept, and on correction extracts patterns from feedback and applies regression penalties."""
         self._exchange_count += 1
 
         if accepted:
@@ -116,23 +119,28 @@ class BasePatternIntelligence:
     # --- Direct Pattern Management ---
 
     def add_pattern(self, pattern: Pattern) -> str:
+        """Insert a pattern directly (bypassing feedback extraction); returns its id."""
         return self.db.insert_pattern(pattern)
 
     def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
+        """Fetch a single pattern by id, or None."""
         return self.db.get_pattern(pattern_id)
 
     def list_patterns(self, category: Optional[str] = None) -> list[Pattern]:
+        """List all patterns, optionally filtered to one category value."""
         patterns = self.db.get_all_patterns()
         if category:
             patterns = [p for p in patterns if p.category.value == category]
         return patterns
 
     def update_pattern(self, pattern: Pattern) -> None:
+        """Persist changes to an existing pattern."""
         self.db.update_pattern(pattern)
 
     # --- Diagnostics ---
 
     def get_stats(self) -> dict:
+        """Return aggregate pattern stats — totals, average proficiency, per-category counts, and low-proficiency / high-severity counts."""
         patterns = self.db.get_all_patterns()
         if not patterns:
             return {"total_patterns": 0, "avg_proficiency": 0.0,
@@ -154,6 +162,7 @@ class BasePatternIntelligence:
     # --- Lifecycle ---
 
     def close(self) -> None:
+        """Close the underlying pattern database."""
         self.db.close()
 
     def __enter__(self):

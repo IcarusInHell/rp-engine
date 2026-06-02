@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 
 class LLMResponse(BaseModel):
+    """A normalized LLM completion — content, model id, and the raw token-usage dict."""
+
     content: str
     model: str
     usage: dict
@@ -41,20 +43,28 @@ class LLMProvider(Protocol):
         temperature: float = 0.6,
         max_tokens: int = 1500,
         response_format: dict | None = None,
-    ) -> LLMResponse: ...
+    ) -> LLMResponse:
+        """Generate a completion for ``messages`` and return a normalized LLMResponse."""
+        ...
 
-    async def generate_stream(
+    def generate_stream(
         self,
         messages: list[dict],
         model: str,
         temperature: float = 0.6,
         max_tokens: int = 1500,
-    ) -> AsyncIterator[str]: ...
+    ) -> AsyncIterator[str]:
+        """Stream a completion as an async iterator of text chunks."""
+        ...
 
     async def embed(
         self,
         texts: list[str],
         model: str,
-    ) -> list[list[float]]: ...
+    ) -> list[list[float]]:
+        """Embed ``texts`` and return one vector per input."""
+        ...
 
-    async def close(self) -> None: ...
+    async def close(self) -> None:
+        """Release the provider's underlying HTTP client / connections."""
+        ...

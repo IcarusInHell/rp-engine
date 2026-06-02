@@ -7,6 +7,8 @@ from .types import PatternCategory, TaskSignature
 
 
 class PatternDB(BasePatternDB):
+    """Writing pattern store — BasePatternDB bound to PatternCategory; serializes the 5-dimension task signature to its trigger row."""
+
     _category_enum = PatternCategory
 
     def __init__(self, db_path: str = "writing_intelligence.db"):

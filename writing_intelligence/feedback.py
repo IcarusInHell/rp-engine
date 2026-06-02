@@ -8,6 +8,8 @@ from .db import PatternDB
 
 
 class FeedbackProcessor(BaseFeedbackProcessor):
+    """Extracts writing patterns from a correction — builds the LLM extraction prompt over the task signature, defaulting to the word_choice category."""
+
     _category_enum = PatternCategory
 
     def __init__(self, db: PatternDB, llm_call: Optional[Callable[[str], str]] = None):

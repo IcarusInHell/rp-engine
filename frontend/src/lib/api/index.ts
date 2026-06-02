@@ -12,3 +12,5 @@ export * from './vectors';
 export * from './config';
 export * from './customState';
 export * from './chat';
+export * from './prompt';
+export * from './lorebook';

@@ -174,6 +174,11 @@ async def update_guidelines(
         "integrate_user_narrative", "preserve_user_details",
         "sensitive_themes", "hard_limits",
         "include_writing_principles", "include_npc_framework", "include_output_format",
+        # Phase 6: per-RP injection-depth override (read at prompt assembly,
+        # Phase 4). prompt_order / lorebooks have their own dedicated endpoints
+        # (/api/prompt/order, /api/lorebook/active); injection_depths had no
+        # write path until now.
+        "injection_depths",
     }
     for key, value in body.items():
         if key in allowed_fields:
@@ -204,6 +209,9 @@ async def update_guidelines(
         include_writing_principles=frontmatter.get("include_writing_principles", True),
         include_npc_framework=frontmatter.get("include_npc_framework", True),
         include_output_format=frontmatter.get("include_output_format", True),
+        injection_depths=frontmatter.get("injection_depths"),
+        prompt_order=frontmatter.get("prompt_order"),
+        lorebooks=frontmatter.get("lorebooks"),
         body=file_body.strip() if file_body and file_body.strip() else None,
     )
     return resp
@@ -217,4 +225,10 @@ async def get_system_prompt(
     """Return a structured system prompt with writing rules, NPC framework, and RP conventions."""
     sections = assembler.get_sections(rp_folder)
     system_prompt = assembler.assemble_static_prompt(sections)
-    return {"system_prompt": system_prompt, "sections": sections}
+    return {
+        "system_prompt": system_prompt,
+        "sections": sections,
+        # Phase 6: effective per-section injection depths + whether injection is
+        # enabled, so the preview can show section positions/depths (config view).
+        "injection": assembler.injection_preview(rp_folder),
+    }

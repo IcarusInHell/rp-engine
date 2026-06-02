@@ -36,6 +36,8 @@ class PromptOrderResponse(BaseModel):
 
 
 class PromptOrderUpdate(BaseModel):
+    """Request body carrying the new ordered list of depth-0 section names."""
+
     order: list[str]
 
 

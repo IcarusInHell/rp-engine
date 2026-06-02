@@ -71,6 +71,7 @@ async def chat_completions(
     db: Database = Depends(get_db),
     chat_manager: ChatManager = Depends(get_chat_manager),
 ):
+    """OpenAI-compatible chat completion — maps the last user message into an RP turn (streaming or single response)."""
     user_message = _extract_last_user_message(body.messages)
     rp_folder, branch, session_id = await resolve_active_session(db, rp_folder, branch)
     created = int(time.time())
@@ -168,6 +169,7 @@ async def _stream_response(
 
 @router.get("/models")
 async def list_models():
+    """List available models (OpenAI-compatible) — advertises the single `rp-engine` model."""
     return ModelListResponse(
         data=[ModelInfo(id="rp-engine", created=int(time.time()))],
     )

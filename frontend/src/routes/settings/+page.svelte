@@ -25,6 +25,7 @@
 		{ id: 'search',      label: 'Search Tuning'  },
 		{ id: 'trust',       label: 'Trust Tuning'   },
 		{ id: 'context',     label: 'Context Tuning' },
+		{ id: 'prompt',      label: 'Prompt Assembly'},
 		{ id: 'diagnostics', label: 'Diagnostics'    },
 		{ id: 'apikeys',     label: 'API Keys'       },
 	];
@@ -32,6 +33,19 @@
 	let activeSection = $state('general');
 	let loadError = $state('');
 	let saveStatus: Record<string, 'idle' | 'saving' | 'saved' | 'error'> = $state({});
+
+	// ── Prompt assembly (global PromptConfig — Phase 6) ──
+	// The backend config merge is shallow, so we retain the loaded sub-objects
+	// (injection.depths, token_budget.allocation) and only override the leaves the
+	// UI exposes — otherwise a user's custom global depths/allocation would be lost.
+	let loadedPrompt = $state<import('$lib/types').PromptConfig | null>(null);
+	let promptInjectionEnabled = $state(false);
+	let tokenBudgetEnabled = $state(false);
+	let tokenModelWindow = $state(128000);
+	let tokenSafetyMargin = $state(500);
+	let exampleEnabled = $state(true);
+	let exampleMax = $state(3);
+	let triggerStemming = $state(true);
 
 	// Server
 	let serverHost = $state('0.0.0.0');
@@ -213,6 +227,16 @@
 			contextMaxDocs     = cfg.context.max_documents;
 			contextMaxHops     = cfg.context.max_graph_hops;
 			contextStaleAfter  = cfg.context.stale_threshold_turns;
+			if (cfg.prompt) {
+				loadedPrompt = cfg.prompt;
+				promptInjectionEnabled = cfg.prompt.injection?.enabled ?? false;
+				tokenBudgetEnabled     = cfg.prompt.token_budget?.enabled ?? false;
+				tokenModelWindow       = cfg.prompt.token_budget?.model_context_window ?? 128000;
+				tokenSafetyMargin      = cfg.prompt.token_budget?.safety_margin ?? 500;
+				exampleEnabled         = cfg.prompt.example_dialogue?.enabled ?? true;
+				exampleMax             = cfg.prompt.example_dialogue?.max_examples ?? 3;
+				triggerStemming        = cfg.prompt.trigger_stemming ?? true;
+			}
 			diagStatus = ds;
 			diagEnabled = ds.enabled;
 			diagLevel = ds.level as 'full' | 'metadata';
@@ -321,6 +345,26 @@
 			max_score: trustMax,
 		});
 	}
+	function savePrompt() {
+		save('prompt', {
+			injection: { ...(loadedPrompt?.injection ?? {}), enabled: promptInjectionEnabled },
+			token_budget: {
+				...(loadedPrompt?.token_budget ?? {}),
+				enabled: tokenBudgetEnabled,
+				model_context_window: tokenModelWindow,
+				safety_margin: tokenSafetyMargin,
+			},
+			example_dialogue: {
+				// Spread preserves pin_examples (stored value untouched — it has no
+				// backend consumer yet, so the UI doesn't expose it).
+				...(loadedPrompt?.example_dialogue ?? {}),
+				enabled: exampleEnabled,
+				max_examples: exampleMax,
+			},
+			trigger_stemming: triggerStemming,
+		});
+	}
+
 	function saveContext() {
 		save('context', {
 			max_documents: contextMaxDocs,
@@ -1017,6 +1061,84 @@
 						</div>
 					</div>
 					{@render saveButton('context', saveContext)}
+				</div>
+			</Card>
+
+		<!-- Prompt Assembly (global) -->
+		{:else if activeSection === 'prompt'}
+			<Card>
+				<div class="px-4 py-3 border-b border-border-custom">
+					<h2 class="text-sm font-semibold text-text">Prompt Assembly</h2>
+					<p class="text-xs text-text-dim mt-0.5">Global SillyTavern-inspired prompt controls. Per-RP injection depths &amp; section order live on each RP's Prompt page.</p>
+				</div>
+				<div class="p-4 space-y-5">
+					<!-- Token budget -->
+					<div class="space-y-3">
+						<div class="flex items-center justify-between">
+							<div>
+								<p class="text-sm font-medium text-text">Token-Budget History</p>
+								<p class="text-xs text-text-dim mt-0.5">Fill history newest-first by token count instead of the fixed exchange window. Off = legacy exchange_window.</p>
+							</div>
+							<Toggle bind:checked={tokenBudgetEnabled} />
+						</div>
+						{#if tokenBudgetEnabled}
+							<div class="grid grid-cols-2 gap-4">
+								<div>
+									<label class="block text-xs font-medium text-text-dim mb-1" for="tok-window">Model Context Window</label>
+									<input id="tok-window" type="number" bind:value={tokenModelWindow} min="1000"
+										class="w-full bg-bg-subtle border border-border-custom rounded-md px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-accent" />
+								</div>
+								<div>
+									<label class="block text-xs font-medium text-text-dim mb-1" for="tok-margin">Safety Margin</label>
+									<input id="tok-margin" type="number" bind:value={tokenSafetyMargin} min="0"
+										class="w-full bg-bg-subtle border border-border-custom rounded-md px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-accent" />
+								</div>
+							</div>
+						{/if}
+					</div>
+
+					<div class="border-t border-border-custom"></div>
+
+					<!-- Example dialogue -->
+					<div class="space-y-3">
+						<div class="flex items-center justify-between">
+							<div>
+								<p class="text-sm font-medium text-text">Example Dialogue</p>
+								<p class="text-xs text-text-dim mt-0.5">Inject a card's <code>## Example Dialogue</code> as few-shot user/assistant pairs before history.</p>
+							</div>
+							<Toggle bind:checked={exampleEnabled} />
+						</div>
+						{#if exampleEnabled}
+							<div>
+								<label class="block text-xs font-medium text-text-dim mb-1" for="ex-max">Max Examples</label>
+								<input id="ex-max" type="number" bind:value={exampleMax} min="0" max="20"
+									class="w-40 bg-bg-subtle border border-border-custom rounded-md px-3 py-2 text-sm text-text focus:outline-none focus:ring-1 focus:ring-accent" />
+								<!-- pin_examples intentionally NOT exposed: it has no backend consumer
+								     (Feature D budget-coupling was never built). Surfacing it would be a
+								     no-op control. Flagged for Phase 7 (wire or delete the config). -->
+							</div>
+						{/if}
+					</div>
+
+					<div class="border-t border-border-custom"></div>
+
+					<!-- Injection + stemming -->
+					<div class="flex items-center justify-between">
+						<div>
+							<p class="text-sm font-medium text-text">Depth Injection</p>
+							<p class="text-xs text-text-dim mt-0.5">Move dynamic context out of the system message into in-history injections at per-section depths (set per RP).</p>
+						</div>
+						<Toggle bind:checked={promptInjectionEnabled} />
+					</div>
+					<div class="flex items-center justify-between">
+						<div>
+							<p class="text-sm font-medium text-text">Trigger Keyword Stemming</p>
+							<p class="text-xs text-text-dim mt-0.5">Morphology-aware trigger/lorebook matching (union with exact). Kill-switch back to exact matching.</p>
+						</div>
+						<Toggle bind:checked={triggerStemming} />
+					</div>
+
+					{@render saveButton('prompt', savePrompt)}
 				</div>
 			</Card>
 

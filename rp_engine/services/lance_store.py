@@ -82,6 +82,8 @@ CARD_SCHEMA = pa.schema([
 
 @dataclass
 class LanceSearchResult:
+    """One LanceDB vector-search hit — matched text, similarity score (1 − distance), and source metadata."""
+
     text: str
     score: float
     metadata: dict[str, Any] = field(default_factory=dict)
