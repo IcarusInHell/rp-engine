@@ -25,7 +25,7 @@ _ALLOWED_EXTENSIONS = {".md", ".json", ".jsonl", ".png", ".jpg", ".jpeg", ".webp
 _SAFE_NAME = re.compile(r"^[\w\s\-'()]+$")
 
 
-class ImportError(Exception):
+class ImportValidationError(Exception):
     """Raised when import validation fails."""
 
 
@@ -37,14 +37,14 @@ async def import_rp(
     """Import an RP from a ZIP archive.
 
     Returns (rp_folder, stats).
-    Raises ImportError on validation failure.
+    Raises ImportValidationError on validation failure.
     """
     if len(zip_bytes) > _MAX_ZIP_BYTES:
-        raise ImportError(f"ZIP file too large: {len(zip_bytes)} bytes (max {_MAX_ZIP_BYTES})")
+        raise ImportValidationError(f"ZIP file too large: {len(zip_bytes)} bytes (max {_MAX_ZIP_BYTES})")
 
     buf = BytesIO(zip_bytes)
     if not zipfile.is_zipfile(buf):
-        raise ImportError("Not a valid ZIP file")
+        raise ImportValidationError("Not a valid ZIP file")
 
     buf.seek(0)
     with zipfile.ZipFile(buf, "r") as zf:
@@ -57,22 +57,22 @@ async def import_rp(
             manifest_raw = zf.read("manifest.json")
             manifest = json.loads(manifest_raw)
         except KeyError:
-            raise ImportError("Missing manifest.json in ZIP") from None
+            raise ImportValidationError("Missing manifest.json in ZIP") from None
         except json.JSONDecodeError:
-            raise ImportError("Invalid manifest.json") from None
+            raise ImportValidationError("Invalid manifest.json") from None
 
         format_version = manifest.get("format_version", "")
         if not format_version.startswith("1."):
-            raise ImportError(f"Unsupported format version: {format_version}")
+            raise ImportValidationError(f"Unsupported format version: {format_version}")
 
         rp_folder = manifest.get("rp_folder", "")
         if not rp_folder or not _SAFE_NAME.match(rp_folder):
-            raise ImportError(f"Invalid RP folder name in manifest: {rp_folder!r}")
+            raise ImportValidationError(f"Invalid RP folder name in manifest: {rp_folder!r}")
 
         # Check for conflicts
         rp_dir = vault_root / rp_folder
         if rp_dir.exists():
-            raise ImportError(f"RP folder already exists: {rp_folder}")
+            raise ImportValidationError(f"RP folder already exists: {rp_folder}")
 
         stats = ImportStats()
 
@@ -117,11 +117,11 @@ def _validate_zip_entry(info: zipfile.ZipInfo) -> None:
 
     # No absolute paths
     if name.startswith("/") or name.startswith("\\"):
-        raise ImportError(f"Absolute path in ZIP: {name}")
+        raise ImportValidationError(f"Absolute path in ZIP: {name}")
 
     # No path traversal
     if ".." in name:
-        raise ImportError(f"Path traversal in ZIP: {name}")
+        raise ImportValidationError(f"Path traversal in ZIP: {name}")
 
     # Skip directories
     if info.is_dir():
@@ -130,7 +130,7 @@ def _validate_zip_entry(info: zipfile.ZipInfo) -> None:
     # Check extension
     p = PurePosixPath(name)
     if p.suffix.lower() not in _ALLOWED_EXTENSIONS:
-        raise ImportError(f"Disallowed file type in ZIP: {name}")
+        raise ImportValidationError(f"Disallowed file type in ZIP: {name}")
 
 
 def _write_card_files(zf: zipfile.ZipFile, rp_dir: Path) -> int:
@@ -182,6 +182,30 @@ def _write_lorebook_files(zf: zipfile.ZipFile, rp_dir: Path) -> int:
     return count
 
 
+async def _table_count(db: Database, table: str) -> int:
+    """Current total row count for a table (whole-table; writes are serialized)."""
+    return await db.fetch_val(f"SELECT COUNT(*) FROM {table}") or 0
+
+
+def _verify_no_silent_skip(table: str, *, expected: int, inserted: int) -> None:
+    """Fail loud if ``INSERT OR IGNORE`` silently dropped rows on import.
+
+    ``INSERT OR IGNORE`` raises on FK violations but SILENTLY swallows NOT NULL /
+    UNIQUE / PRIMARY KEY collisions — e.g. re-importing an RP the DB already holds
+    (the conflict check is filesystem-only), or an import-side transform nulling a
+    required column. A post-insert row delta smaller than the rows we tried to
+    insert means data was lost; refuse to report a partial restore as success.
+    """
+    if inserted < expected:
+        raise ImportValidationError(
+            f"Import dropped {expected - inserted}/{expected} rows of '{table}': a "
+            "NOT NULL / UNIQUE / PRIMARY KEY collision was silently swallowed by "
+            "INSERT OR IGNORE (the database may already hold this RP's rows, or the "
+            "archive is internally inconsistent). Refusing to report a partial "
+            "restore as success."
+        )
+
+
 async def _import_table_batch(
     db: Database,
     zf: zipfile.ZipFile,
@@ -214,7 +238,10 @@ async def _import_table_batch(
     reader = _read_jsonl if jsonl else _read_json
     rows = reader(zf, f"{prefix}/{table}{ext}")
     id_map: dict[int, int] = {}
+    if not rows:
+        return 0, id_map
 
+    before = await _table_count(db, table)
     for row in rows:
         old_id = row.pop("id", None) if strip_id else None
         row["rp_folder"] = rp_folder
@@ -227,6 +254,8 @@ async def _import_table_batch(
         if build_id_map and old_id is not None:
             id_map[int(old_id)] = new_id
 
+    after = await _table_count(db, table)
+    _verify_no_silent_skip(table, expected=len(rows), inserted=after - before)
     return len(rows), id_map
 
 
@@ -310,17 +339,25 @@ async def _import_state(
         build_id_map=True,
     )
 
-    # 10. Manifest entries (FK to manifests.id, conditional target_id remap)
+    # 10. Manifest entries (FK to manifests.id, conditional target_id remap).
+    #     Hand-rolled (not _import_table_batch) for the conditional target_id remap,
+    #     so it carries its own silent-skip reconciliation.
     manifest_entries = _read_json(zf, "state/analysis_manifest_entries.json")
-    for row in manifest_entries:
-        row.pop("id", None)
-        _remap_fk(row, "manifest_id", manifest_id_map)
-        if row.get("target_id") is not None and row.get("target_table") in (
-            "exchanges", "events", "trust_modifications",
-            "exchange_variants", "exchange_bookmarks", "exchange_annotations",
-        ):
-            _remap_fk(row, "target_id", exchange_id_map)
-        await _insert_row(db, "analysis_manifest_entries", row)
+    if manifest_entries:
+        before = await _table_count(db, "analysis_manifest_entries")
+        for row in manifest_entries:
+            row.pop("id", None)
+            _remap_fk(row, "manifest_id", manifest_id_map)
+            if row.get("target_id") is not None and row.get("target_table") in (
+                "exchanges", "events", "trust_modifications",
+                "exchange_variants", "exchange_bookmarks", "exchange_annotations",
+            ):
+                _remap_fk(row, "target_id", exchange_id_map)
+            await _insert_row(db, "analysis_manifest_entries", row)
+        after = await _table_count(db, "analysis_manifest_entries")
+        _verify_no_silent_skip(
+            "analysis_manifest_entries", expected=len(manifest_entries), inserted=after - before
+        )
 
     # 11. Optional tables (exchange_id FK where present)
     for table in [

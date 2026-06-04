@@ -373,7 +373,13 @@ IMPORTANT: Only include items that are CLEARLY present in the conversation. If a
             if resolved:
                 npc["npcName"] = resolved
 
-        # Resolve scene significance characters
+        # Resolve scene significance characters.
+        # NOTE: only `characters` is touched here. `score`/`categories`/`brief`/
+        # `suggestedCardTypes` are intentionally NOT consumed yet — the
+        # significance→automatic-memory / card-suggestion feature is planned and
+        # DEFERRED until the soul layer (it wants ledger/soul source material). The
+        # LLM grades every scene so the signal is ready when the consumer is built.
+        # See models.SceneSignificance + .claude/plans/ideas/living-world-card-generation-from-play.md
         sig = data.get("sceneSignificance", {})
         if "characters" in sig:
             sig["characters"] = [

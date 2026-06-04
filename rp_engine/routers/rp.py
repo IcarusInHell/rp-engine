@@ -31,7 +31,7 @@ from rp_engine.models.rp import (
 from rp_engine.services.card_indexer import CARD_TYPE_DIRS, CardIndexer
 from rp_engine.services.export_service import export_rp as do_export
 from rp_engine.services.guidelines_service import GuidelinesService
-from rp_engine.services.import_service import ImportError as ImportValidationError
+from rp_engine.services.import_service import ImportValidationError
 from rp_engine.services.import_service import import_rp as do_import
 from rp_engine.utils.chunking import get_effective_chunking
 from rp_engine.utils.frontmatter import parse_file, serialize_frontmatter

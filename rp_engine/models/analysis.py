@@ -139,7 +139,19 @@ class StoryStateExtracted(BaseModel):
 
 
 class SceneSignificance(BaseModel):
-    """LLM-scored scene significance — score, categories, and suggested card types."""
+    """LLM-scored scene significance — score, categories, and suggested card types.
+
+    DORMANT BY DESIGN — planned feature, deferred until the soul layer lands. Every
+    analysis grades the scene (``score`` 1-10 = card-worthiness, ``categories``,
+    ``brief`` = draft content, ``suggested_card_types``, ``in_story_timestamp``,
+    ``characters``), but NOTHING consumes the grade yet: only ``.characters`` is
+    name-resolved (in ``response_analyzer``) and even that result is discarded.
+    Intended as the scene-QUALITY complement to the entity-REPETITION ``card_gaps``
+    accumulator — ``score >= threshold`` → an automatic memory / card suggestion of
+    the suggested type (the lazy/hooks rp-engine wired a better version of this).
+    Do NOT treat its absence of consumers as a bug. Full design + open options:
+    ``.claude/plans/ideas/living-world-card-generation-from-play.md``.
+    """
     score: int = 0
     categories: list[str] = []
     brief: str | None = None

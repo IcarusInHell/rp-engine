@@ -26,11 +26,11 @@ Two complementary guards live here:
    meta-assert that export actually bundled a file for every table first.
 
    CEILING: it seeds exactly ONE row per table, so it verifies path / format / FK
-   *wiring*, NOT row-count fidelity and NOT multi-row drops. Import uses
-   ``INSERT OR IGNORE``, which (verified) raises on FK violations but SILENTLY
-   swallows NOT NULL / UNIQUE / PK collisions — a second row that collides on such
-   a constraint would be dropped with no error and this test would stay green. A
-   fail-loud-on-skipped-row import pass is a separate, unbuilt decision.
+   *wiring*, not multi-row constraint-collision behaviour. Import uses
+   ``INSERT OR IGNORE``, which raises on FK violations but SILENTLY swallows
+   NOT NULL / UNIQUE / PK collisions — that multi-row drop surface is guarded
+   separately by ``test_reimport_into_dirty_db_fails_loud`` below (import now
+   reconciles inserted-vs-expected row counts and raises instead of dropping).
 """
 
 from __future__ import annotations
@@ -39,6 +39,8 @@ import ast
 import inspect
 import textwrap
 import zipfile
+
+import pytest
 
 from rp_engine.database import Database
 from rp_engine.services import export_service, import_service
@@ -250,6 +252,45 @@ async def test_seeded_round_trip_preserves_every_table(tmp_path):
             "import-side FK/order drop swallowed by the _read_json []-floor or "
             "INSERT OR IGNORE)."
         )
+    finally:
+        await source_db.close()
+        await target_db.close()
+
+
+async def test_reimport_into_dirty_db_fails_loud(tmp_path):
+    """Re-importing an RP the DB already holds must FAIL LOUD, not silently drop.
+
+    The folder-conflict check is filesystem-only, so importing the same RP into a
+    fresh vault dir but a DB that already has its rows hits PRIMARY KEY collisions.
+    ``INSERT OR IGNORE`` swallows those silently — the exact multi-row drop the
+    single-row round-trip can't see. ``_verify_no_silent_skip`` reconciles
+    inserted-vs-expected counts and raises ``import_service.ImportValidationError``.
+
+    Mutation proof: delete the ``_verify_no_silent_skip`` call in
+    ``_import_table_batch`` → the second import silently no-ops and this test goes
+    from raised-error to no-error (red); restore → green.
+    """
+    source_db = Database(tmp_path / "source.db")
+    await source_db.initialize()
+    target_db = Database(tmp_path / "target.db")
+    await target_db.initialize()
+    try:
+        await _seed_all_tables(source_db, RT_FOLDER)
+        src_vault = tmp_path / "src_vault"
+        src_vault.mkdir()
+        buf = await export_rp(source_db, src_vault, RT_FOLDER)
+
+        # First import into the fresh target DB succeeds.
+        v1 = tmp_path / "v1"
+        v1.mkdir()
+        await import_rp(target_db, v1, buf.getvalue())
+
+        # Second import into the SAME DB (different vault dir, so the filesystem
+        # folder check passes) collides on PKs — must raise, not silently drop.
+        v2 = tmp_path / "v2"
+        v2.mkdir()
+        with pytest.raises(import_service.ImportValidationError, match="silently swallowed"):
+            await import_rp(target_db, v2, buf.getvalue())
     finally:
         await source_db.close()
         await target_db.close()

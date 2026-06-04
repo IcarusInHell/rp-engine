@@ -273,10 +273,20 @@ async def test_export_import_roundtrips_sidecar(built_container, primed_config, 
 
     buf = await export_rp(built_container.db, vault, RP_FOLDER)
 
-    # Import into a fresh vault (import refuses to overwrite an existing folder).
+    # Import into a fresh vault AND a fresh DB. A separate DB mirrors real restore
+    # (you don't import an RP into a DB that already holds it) and avoids the
+    # re-import PK collisions that import now fails loud on. This test only asserts
+    # on the extracted sidecar *files*, so a clean DB is sufficient.
+    from rp_engine.database import Database
+
     target_vault = tmp_path / "imported_vault"
     target_vault.mkdir()
-    imported_folder, _stats = await import_rp(built_container.db, target_vault, buf.getvalue())
+    target_db = Database(tmp_path / "import_target.db")
+    await target_db.initialize()
+    try:
+        imported_folder, _stats = await import_rp(target_db, target_vault, buf.getvalue())
+    finally:
+        await target_db.close()
 
     imported_sidecar = (
         target_vault / imported_folder / "Story Cards" / "Characters" / ".meta" / "char_quinn.json"

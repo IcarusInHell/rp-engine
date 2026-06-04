@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "generated_at": "2026-06-04T11:17:23.152766+00:00",
+    "generated_at": "2026-06-04T13:24:07.000683+00:00",
     "generator_version": "1.1.0",
     "files_parsed": 164,
     "packages": [
@@ -9,7 +9,7 @@
       "writing_intelligence",
       "pattern_intelligence"
     ],
-    "parse_time_ms": 2078
+    "parse_time_ms": 2889
   },
   "files": {
     "rp_engine/__init__.py": {
@@ -11603,7 +11603,7 @@
             "GuidelinesService"
           ],
           "rp_engine.services.import_service": [
-            "ImportError",
+            "ImportValidationError",
             "import_rp"
           ],
           "rp_engine.utils.chunking": [
@@ -15211,7 +15211,7 @@
         ]
       },
       "classes": {
-        "ImportError": {
+        "ImportValidationError": {
           "bases": [
             "Exception"
           ],
@@ -15509,6 +15509,9 @@
           "rp_engine.services.llm._client": [
             "LLMClient"
           ],
+          "rp_engine.services.llm._concurrency": [
+            "AdjustableLimit"
+          ],
           "rp_engine.services.llm._factory": [
             "build_providers"
           ],
@@ -15528,6 +15531,7 @@
         "stdlib": []
       },
       "exports": [
+        "AdjustableLimit",
         "LLMClient",
         "LLMError",
         "LLMProvider",
@@ -17031,7 +17035,7 @@
               "is_async": false
             },
             "_resolve_names": {
-              "lines": 47,
+              "lines": 53,
               "is_async": false
             },
             "_resolve_name": {
@@ -25754,7 +25758,7 @@
           "rp_engine/routers/rp.py"
         ]
       },
-      "ImportError": {
+      "ImportValidationError": {
         "imported_by": [
           "rp_engine/routers/rp.py"
         ]
@@ -26724,6 +26728,12 @@
           "rp_engine/services/vector_search.py"
         ]
       },
+      "AdjustableLimit": {
+        "imported_by": [
+          "rp_engine/services/llm/__init__.py",
+          "rp_engine/services/llm/_base.py"
+        ]
+      },
       "OpenAICompatProvider": {
         "imported_by": [
           "rp_engine/services/llm/__init__.py",
@@ -26757,11 +26767,6 @@
           "rp_engine/services/llm/_base.py",
           "rp_engine/services/llm/_client.py",
           "rp_engine/services/llm_client.py"
-        ]
-      },
-      "AdjustableLimit": {
-        "imported_by": [
-          "rp_engine/services/llm/_base.py"
         ]
       },
       "parse_sse_line": {
@@ -27866,7 +27871,7 @@
         "SearchMode"
       ],
       "Exception": [
-        "ImportError",
+        "ImportValidationError",
         "LLMError"
       ],
       "_BaseHTTPProvider": [
@@ -31725,25 +31730,25 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 318,
+          "line": 351,
           "receiver": "row",
           "caller": "_import_state"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 318,
+          "line": 351,
           "receiver": "row",
           "caller": "_import_state"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 361,
+          "line": 398,
           "receiver": "row",
           "caller": "_remap_fk"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 363,
+          "line": 400,
           "receiver": "id_map",
           "caller": "_remap_fk"
         },
@@ -33003,25 +33008,25 @@
         },
         {
           "file": "rp_engine/services/response_analyzer.py",
-          "line": 377,
-          "receiver": "data",
-          "caller": "ResponseAnalyzer._resolve_names"
-        },
-        {
-          "file": "rp_engine/services/response_analyzer.py",
-          "line": 380,
-          "receiver": "sig",
-          "caller": "ResponseAnalyzer._resolve_names"
-        },
-        {
-          "file": "rp_engine/services/response_analyzer.py",
-          "line": 385,
+          "line": 383,
           "receiver": "data",
           "caller": "ResponseAnalyzer._resolve_names"
         },
         {
           "file": "rp_engine/services/response_analyzer.py",
           "line": 386,
+          "receiver": "sig",
+          "caller": "ResponseAnalyzer._resolve_names"
+        },
+        {
+          "file": "rp_engine/services/response_analyzer.py",
+          "line": 391,
+          "receiver": "data",
+          "caller": "ResponseAnalyzer._resolve_names"
+        },
+        {
+          "file": "rp_engine/services/response_analyzer.py",
+          "line": 392,
           "receiver": "csc",
           "caller": "ResponseAnalyzer._resolve_names"
         },
@@ -35383,7 +35388,7 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 372,
+          "line": 409,
           "receiver": "db",
           "caller": "_insert_row"
         },
@@ -36156,6 +36161,12 @@
           "line": 288,
           "receiver": "self.db",
           "caller": "ExchangeWriter.update_exchange"
+        },
+        {
+          "file": "rp_engine/services/import_service.py",
+          "line": 187,
+          "receiver": "db",
+          "caller": "_table_count"
         },
         {
           "file": "rp_engine/services/recap_builder.py",
@@ -37861,7 +37872,7 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 368,
+          "line": 405,
           "receiver": "row",
           "caller": "_insert_row"
         },
@@ -37941,13 +37952,13 @@
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 219,
+          "line": 246,
           "receiver": "row",
           "caller": "_import_table_batch"
         },
         {
           "file": "rp_engine/services/import_service.py",
-          "line": 316,
+          "line": 349,
           "receiver": "row",
           "caller": "_import_state"
         },
@@ -41575,19 +41586,19 @@
         },
         {
           "file": "rp_engine/services/response_analyzer.py",
-          "line": 380,
-          "receiver": "self",
-          "caller": "ResponseAnalyzer._resolve_names"
-        },
-        {
-          "file": "rp_engine/services/response_analyzer.py",
-          "line": 381,
+          "line": 386,
           "receiver": "self",
           "caller": "ResponseAnalyzer._resolve_names"
         },
         {
           "file": "rp_engine/services/response_analyzer.py",
           "line": 387,
+          "receiver": "self",
+          "caller": "ResponseAnalyzer._resolve_names"
+        },
+        {
+          "file": "rp_engine/services/response_analyzer.py",
+          "line": 393,
           "receiver": "self",
           "caller": "ResponseAnalyzer._resolve_names"
         }
