@@ -34,8 +34,8 @@ class ServerConfig(BaseModel):
 class PathsConfig(BaseModel):
     """Filesystem paths — the Obsidian vault root and the SQLite db path (both resolved relative to PROJECT_ROOT)."""
 
-    vault_root: str = ".."
-    db_path: str = "data/rp-engine.db"
+    vault_root: str = "../RPs"
+    db_path: str = "../project/data/rp-engine.db"
 
 
 class LLMModelsConfig(BaseModel):

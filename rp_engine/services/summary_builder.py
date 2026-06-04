@@ -15,6 +15,7 @@ from rp_engine.database import Database
 from rp_engine.models.session import SessionSummary
 from rp_engine.services.lance_store import LanceStore
 from rp_engine.services.llm_client import LLMClient
+from rp_engine.utils.json_helpers import safe_parse_json, safe_parse_json_array
 from rp_engine.utils.trust import fetch_thread_progress
 
 logger = logging.getLogger(__name__)
@@ -116,12 +117,7 @@ class SummaryBuilder:
         )
         if not row:
             return None
-        key_moments = []
-        if row.get("key_moments"):
-            try:
-                key_moments = json.loads(row["key_moments"])
-            except (json.JSONDecodeError, TypeError):
-                pass
+        key_moments = safe_parse_json_array(row.get("key_moments"))
         return SessionSummary(
             session_id=row["session_id"],
             rp_folder=row["rp_folder"],
@@ -242,8 +238,6 @@ class SummaryBuilder:
 
     async def _get_thread_summary(self, rp_folder: str, branch: str) -> str:
         """One-line active thread summary."""
-        import json as _json
-
         rows = await fetch_thread_progress(self.db, rp_folder, branch)
         if not rows:
             return "No active threads"
@@ -253,7 +247,7 @@ class SummaryBuilder:
             # thresholds is a JSON object like {"gentle": 5, "moderate": 10, "strong": 15}
             raw = r.get("thresholds")
             if raw:
-                th = _json.loads(raw) if isinstance(raw, str) else raw
+                th = safe_parse_json(raw)
                 max_th = max(th.values()) if th else "?"
             else:
                 max_th = "?"

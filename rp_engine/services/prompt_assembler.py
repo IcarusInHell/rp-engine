@@ -26,6 +26,7 @@ from rp_engine.services.ancestry_resolver import AncestryResolver
 from rp_engine.services.guidelines_service import GuidelinesService
 from rp_engine.utils.dialogue_parser import example_dialogue_messages
 from rp_engine.utils.frontmatter import parse_file
+from rp_engine.utils.json_helpers import safe_parse_json
 from rp_engine.utils.provenance import record_drop, record_injected
 from rp_engine.utils.token_utils import estimate_messages_tokens, resolve_token_counter
 
@@ -981,7 +982,6 @@ class PromptAssembler:
         is read from the ``frontmatter`` JSON column (the indexer doesn't populate
         the dedicated column) — PC cards are skipped (their voice is user-driven).
         """
-        import json
         for brief in context_response.npc_briefs:
             if not brief.card_id:
                 continue
@@ -991,13 +991,7 @@ class PromptAssembler:
             )
             if not card:
                 continue
-            fm: dict = {}
-            raw_fm = card.get("frontmatter")
-            if raw_fm:
-                try:
-                    fm = json.loads(raw_fm)
-                except (ValueError, TypeError):
-                    fm = {}
+            fm = safe_parse_json(card.get("frontmatter"))
             if fm.get("is_player_character"):
                 continue
             messages = example_dialogue_messages(

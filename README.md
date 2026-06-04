@@ -209,7 +209,7 @@ pytest -k "test_trust"     # By name pattern
 - [System Prompt Guide](docs/system-prompt-guide.md) — What to include in LLM system prompts
 - [CLAUDE.md Template](docs/rp-claude-md-template.md) — Template for RP sessions using MCP tools
 
-Internal developer docs: `.claude/docs/claude-ref/INDEX.md`
+Internal developer docs: `project/docs/claude-ref/INDEX.md`
 
 ## License
 
